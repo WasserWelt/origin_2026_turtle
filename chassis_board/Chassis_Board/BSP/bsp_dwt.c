@@ -174,3 +174,17 @@ void DWT_Delay_ms(float Delay_ms)
             break;
     }
 }
+
+void DWT_Delay_us(uint64_t Delay_us)
+{
+    uint64_t start_us = DWT_GetTimeline_us();
+
+    uint64_t target_us = start_us + Delay_us;
+
+    while (1)
+    {
+        float current_us = DWT_GetTimeline_us();
+        if (current_us >= target_us)
+            break;
+    }
+}

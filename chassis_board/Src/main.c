@@ -119,8 +119,8 @@ int main(void)
   HAL_TIM_Base_Start_IT(&htim5); // 开启tim5溢出中断，用于定时发送can报文，保险起见在can_filter_init()中启动can外设后再发can报文（理论上不用这样，hal库有保护）
   HAL_TIM_Base_Start_IT(&htim3); // 启动tim3溢出中断，用于定时检测有没有发送失败的can报文并进行重发
   /*****************************************/
-  remote_control_init(); //配置并使能usart3的DMA接收和空闲中断，在没有云台需要直接把遥控器接收机插在底盘C板上时使用
-  // DWT_Init(CPU_FREQ_MHZ); //需要精确延时或看一段代码的运行时长是必须开启
+  //remote_control_init(); //配置并使能usart3的DMA接收和空闲中断，在没有云台需要直接把遥控器接收机插在底盘C板上时使用
+  // DWT_Init(CPU_FREQ_MHZ); //需要精确延时或看一段代码的运行时长时开启
 
   /* USER CODE END 2 */
 

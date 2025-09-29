@@ -19,12 +19,9 @@
   */
 
 #include "remote_control.h"
-
 #include "main.h"
-
-//#include "bsp_usart.h"
 #include "string.h"
-
+#include "bsp_can.h"
 #include "detect_task.h"
 
 
@@ -184,6 +181,8 @@ void Remote_Control_UART_IRQHandler(void)
             if(this_time_rx_len == RC_FRAME_LENGTH)
             {
                 sbus_to_rc(sbus_rx_buf[0], &rc_ctrl);
+                Allocate_Can_Buffer(rc_ctrl.rc.ch[0], rc_ctrl.rc.ch[1], rc_ctrl.rc.ch[2], rc_ctrl.rc.ch[3], CAN_RC_TO_CHASSIS_FIRST_CMD);
+                Allocate_Can_Buffer(rc_ctrl.rc.ch[4], rc_ctrl.rc.s[0], rc_ctrl.rc.s[1], 0, CAN_RC_TO_CHASSIS_SECOND_CMD);
                 //记录数据接收时间
                detect_hook(DBUS_TOE);
 //                sbus_to_usart1(sbus_rx_buf[0]);
@@ -216,6 +215,8 @@ void Remote_Control_UART_IRQHandler(void)
             {
                 //处理遥控器数据
                 sbus_to_rc(sbus_rx_buf[1], &rc_ctrl);
+                Allocate_Can_Buffer(rc_ctrl.rc.ch[0], rc_ctrl.rc.ch[1], rc_ctrl.rc.ch[2], rc_ctrl.rc.ch[3], CAN_RC_TO_CHASSIS_FIRST_CMD);
+                Allocate_Can_Buffer(rc_ctrl.rc.ch[4], rc_ctrl.rc.s[0], rc_ctrl.rc.s[1], 0, CAN_RC_TO_CHASSIS_SECOND_CMD);
                 //记录数据接收时间
                 detect_hook(DBUS_TOE);
 //                sbus_to_usart1(sbus_rx_buf[1]);

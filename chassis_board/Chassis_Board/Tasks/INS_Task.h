@@ -181,5 +181,5 @@ extern const fp32 *get_accel_data_point(void);
   * @retval         INS_magµÄÖ¸Õë
   */
 extern const fp32 *get_mag_data_point(void);
-extern  DMA2_Stream2_IRQHandler_1(void);
+extern  void DMA2_Stream2_IRQHandler_1(void);
 #endif

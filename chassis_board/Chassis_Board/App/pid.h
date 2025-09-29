@@ -24,7 +24,6 @@ enum PID_MODE
     PID_DELTA
 };
 
-#pragma pack(push, 1) //强制1字节对齐，别改
 typedef struct
 {
   uint8_t mode;
@@ -48,7 +47,6 @@ typedef struct
 
 } pid_type_def;
 
-#pragma pack(pop)  //这行也别改
 
 /**
  * @brief          pid struct data init

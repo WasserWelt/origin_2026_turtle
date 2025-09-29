@@ -506,9 +506,6 @@ extern "C"
 
 	/* Functions -----------------------------------------------------------------*/
 	void Referee_StructInit(void);
-	void Referee_UARTInit(uint8_t *Buffer0, uint8_t *Buffer1, uint16_t BufferLength);
-
-	void Referee_IRQHandler(void); 
 	void Referee_UnpackFifoData(unpack_data_t *p_obj, fifo_s_t *referee_fifo);
 	void Referee_SolveFifoData(uint8_t *frame);
 

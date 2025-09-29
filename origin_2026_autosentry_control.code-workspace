@@ -18,7 +18,21 @@
 			"main.h": "c",
 			"cmsis_os.h": "c",
 			"referee.h": "c",
-			"referee_usart_task.h": "c"
+			"referee_usart_task.h": "c",
+			"bsp_buzzer.h": "c",
+			"cboard_to_nuc_usbd_communication.h": "c",
+			"shoot_task.h": "c",
+			"detect_task.h": "c",
+			"task.h": "c",
+			"stm32f4xx_hal.h": "c",
+			"stm32f4xx_hal_conf.h": "c",
+			"stm32f4xx_hal_can.h": "c",
+			"string.h": "c",
+			"protocol.h": "c",
+			"stdint.h": "c",
+			"fifo.h": "c",
+			"motor.h": "c",
+			"bsp_dwt.h": "c"
 		}
 	}
 }

@@ -27,10 +27,6 @@ extern "C"
 #include "protocol.h"
 #include "fifo.h"
 
-/* Defines -------------------------------------------------------------------*/
-#define Referee_UART huart6
-#define Referee_IRQHandler USART6_IRQHandler
-
 /* Referee Defines -----------------------------------------------------------*/
 /* 比赛类型 */
 #define Game_Type_RMUC 1	 // 超级对抗赛
@@ -507,8 +503,6 @@ extern "C"
 
 	/* Functions -----------------------------------------------------------------*/
 	void Referee_StructInit(void);
-	void Referee_UARTInit(uint8_t *Buffer0, uint8_t *Buffer1, uint16_t BufferLength);
-
 	void Referee_UnpackFifoData(unpack_data_t *p_obj, fifo_s_t *referee_fifo);
 	void Referee_SolveFifoData(uint8_t *frame);
 

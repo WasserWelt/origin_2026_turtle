@@ -49,6 +49,23 @@ float Limit_To_180(float in)
 }
 
 /**
+ * @brief 将输入角度值限制在[-90, 90]度区间内
+ * @param in 输入角度值（单位：度），允许任意浮点数值
+ * @return float 调整后的等效角度值，保证在[-90, 90]区间内
+ */
+float Limit_To_90(float in)
+{
+    while (in < -90 || in > 90)
+    {
+        if (in < -90)
+            in = in + 180;
+        else if (in > 90)
+            in = in - 180;
+    }
+    return in;
+}
+
+/**
  * @brief 实现一个斜坡控制算法，用于在参考值和设定值之间平滑过渡。
  *        该函数的目的是通过限制变化率（加速度），避免突变。
  * @param ref 当前位置或状态的参考值。

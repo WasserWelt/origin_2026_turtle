@@ -1,20 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2025 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
@@ -34,7 +34,9 @@
 #include "remote_control.h"
 #include "bsp_can.h"
 #include "bsp_buzzer.h"
+#include "bsp_usart.h"
 #include "bsp_dwt.h"
+#include "motor.h"
 #include "Referee.h"
 #include "referee_usart_task.h"
 /* USER CODE END Includes */
@@ -73,9 +75,9 @@ void MX_FREERTOS_Init(void);
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
+ * @brief  The application entry point.
+ * @retval int
+ */
 int main(void)
 {
 
@@ -117,7 +119,7 @@ int main(void)
   MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
   MX_USB_DEVICE_Init();
-  HAL_TIM_Base_Start_IT(&htim1); // 开启tim1中断，用于向上位机定时发送陀螺仪数据
+  HAL_TIM_Base_Start_IT(&htim1);             // 开启tim1中断，用于向上位机定时发送陀螺仪数据
   HAL_TIM_PWM_Start(&htim10, TIM_CHANNEL_1); // 用于对陀螺仪进行恒温处理
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);  // 蜂鸣器pwm
   buzzer_play_eva();
@@ -126,15 +128,25 @@ int main(void)
   Create_Can_Send_Queues(); // 创建can重发队列，需要保证在开启tim3溢出中断之前调用，不然tim3中断回调函数调用队列会发送错误
   Can_Filter_Init();
   Can_Buffer_Init();
-  /*****************************************/
+  /*****************DM6006使能************************/
+  DWT_Init(CPU_FREQ_MHZ); // 需要精确延时或看一段代码的运行时长时开启
+  float enable_DM_start_time = DWT_GetTimeline_ms();
+  do
+  {
+    enable_DM(BIG_YAW_DM6006_TransID, MIT); // 在定时发送所有can消息之前先使能DM电机，防止后面can负载上升使能不上
+    DWT_Delay_ms(1);
+  } while (!DM_big_yaw_motor.state && (DWT_GetTimeline_ms() - enable_DM_start_time) > 500.0f); // 等待DM电机使能
+  DWT_DeInit(); //用完就关掉，需要用再开，防止计时不准，需要用再打开
+  /***************************************************/
+  // DWT_Init(CPU_FREQ_MHZ); 
   HAL_TIM_Base_Start_IT(&htim5); // 开启tim5中断，用于定时发送can报文，保险起见在can_filter_init()中启动can外设后再发can报文（理论上不用这样，hal库有保护）
   HAL_TIM_Base_Start_IT(&htim3); // 启动tim3中断，用于定时检测有没有发送失败的can报文并进行重发
-  
-  remote_control_init();
-  fifo_s_init(&Referee_FIFO, Referee_FIFO_Buffer, REFEREE_FIFO_BUF_LENGTH);
-  Referee_StructInit();
-  Referee_UARTInit(Referee_Buffer[0], Referee_Buffer[1], REFEREE_USART_RX_BUF_LENGHT);
-  DWT_Init(CPU_FREQ_MHZ);
+
+  remote_control_init();                                                                  // 使能usart3空闲中断并开启接收DMA
+  fifo_s_init(&Referee_FIFO, Referee_FIFO_Buffer, REFEREE_FIFO_BUF_LENGTH);               // 初始化裁判系统数据接收队列
+  Referee_StructInit();                                                                   // 初始化裁判系统数据结构体
+  Referee_USART6_Init(Referee_Buffer[0], Referee_Buffer[1], REFEREE_USART_RX_BUF_LENGHT); // 设置裁判系统串口dma双缓冲区并开启dma，同时使能串口空闲中断
+
   /* USER CODE END 2 */
 
   /* Call init function for freertos objects (in cmsis_os2.c) */
@@ -157,22 +169,22 @@ int main(void)
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
+ * @brief System Clock Configuration
+ * @retval None
+ */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
   /** Configure the main internal regulator output voltage
-  */
+   */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
+   * in the RCC_OscInitTypeDef structure.
+   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -187,9 +199,8 @@ void SystemClock_Config(void)
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+   */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
@@ -206,19 +217,20 @@ void SystemClock_Config(void)
 /* USER CODE END 4 */
 
 /**
-  * @brief  Period elapsed callback in non blocking mode
-  * @note   This function is called  when TIM2 interrupt took place, inside
-  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
-  * a global variable "uwTick" used as application time base.
-  * @param  htim : TIM handle
-  * @retval None
-  */
+ * @brief  Period elapsed callback in non blocking mode
+ * @note   This function is called  when TIM2 interrupt took place, inside
+ * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+ * a global variable "uwTick" used as application time base.
+ * @param  htim : TIM handle
+ * @retval None
+ */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
 
   /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM2) {
+  if (htim->Instance == TIM2)
+  {
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
@@ -227,9 +239,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 }
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
@@ -241,14 +253,14 @@ void Error_Handler(void)
   /* USER CODE END Error_Handler_Debug */
 }
 
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
+ * @brief  Reports the name of the source file and the source line number
+ *         where the assert_param error has occurred.
+ * @param  file: pointer to the source file name
+ * @param  line: assert_param error line source number
+ * @retval None
+ */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */

@@ -1,5 +1,4 @@
 #include "bsp_cap.h"
-#include "Chassis_Task.h"
 
 cap_measure_t cap_data;
 uint8_t cap_recieve_flag=0;

@@ -98,46 +98,6 @@ void Referee_StructInit(void)
 	memset(&Client_Map_Command, 0, sizeof(Client_Map_Command));
 }
 
-void Referee_UARTInit(uint8_t *Buffer0, uint8_t *Buffer1, uint16_t BufferLength)
-{
-	/* 使能串口DMA */
-	SET_BIT(Referee_UART.Instance->CR3, USART_CR3_DMAR);
-	SET_BIT(Referee_UART.Instance->CR3, USART_CR3_DMAT);
-
-	/* 使能串口空闲中断 */
-	__HAL_UART_ENABLE_IT(&Referee_UART, UART_IT_IDLE);
-
-	/* 确保DMA RX失能 */
-	while (Referee_UART.hdmarx->Instance->CR & DMA_SxCR_EN)
-	{
-		__HAL_DMA_DISABLE(Referee_UART.hdmarx);
-	}
-
-	/* 清空标志位 */
-	__HAL_DMA_CLEAR_FLAG(Referee_UART.hdmarx, DMA_LISR_TCIF1);
-
-	/* 设置接收双缓冲区 */
-	Referee_UART.hdmarx->Instance->PAR = (uint32_t)&(Referee_UART.Instance->DR);
-	Referee_UART.hdmarx->Instance->M0AR = (uint32_t)(Buffer0);
-	Referee_UART.hdmarx->Instance->M1AR = (uint32_t)(Buffer1);
-
-	/* 设置数据长度 */
-	__HAL_DMA_SET_COUNTER(Referee_UART.hdmarx, BufferLength);
-
-	/* 使能双缓冲区 */
-	SET_BIT(Referee_UART.hdmarx->Instance->CR, DMA_SxCR_DBM);
-
-	/* 使能DMA RX */
-	__HAL_DMA_ENABLE(Referee_UART.hdmarx);
-
-	/* 确保DMA TX失能 */
-	while (Referee_UART.hdmatx->Instance->CR & DMA_SxCR_EN)
-	{
-		__HAL_DMA_DISABLE(Referee_UART.hdmatx);
-	}
-
-	Referee_UART.hdmatx->Instance->PAR = (uint32_t)&(Referee_UART.Instance->DR);
-}
 
 /*==============================================================================
 			  ##### 裁判系统数据解析函数 #####

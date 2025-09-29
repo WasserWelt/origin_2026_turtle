@@ -16,11 +16,7 @@
 #include "fifo.h"
 #include "protocol.h"
 #include "referee.h"
-#include "shoot_task.h"
-#include "Gimbal_Task.h"
-#include "Chassis_Task.h"
-#include "bsp_cap.h"
-#include "bsp_can.h"
+#include "bsp_usart.h"
 /* Private define ------------------------------------------------------------*/
 #define Referee_FIFOInit fifo_s_init
 #define Max(a, b) ((a) > (b) ? (a) : (b))
@@ -40,13 +36,6 @@ unpack_data_t Referee_Unpack_OBJ;
 
 void referee_usart_task(void const *argument)
 {
-
-	/* 裁判系统初始化 */
-	Referee_StructInit();
-	Referee_UARTInit(Referee_Buffer[0], Referee_Buffer[1], REFEREE_USART_RX_BUF_LENGHT);
-	Referee_FIFOInit(&Referee_FIFO, Referee_FIFO_Buffer, REFEREE_FIFO_BUF_LENGTH);
-	vTaskDelay(111);
-
 	while (1)
 	{
 		/* 解析裁判系统数据 */
