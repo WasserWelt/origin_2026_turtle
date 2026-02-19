@@ -12,11 +12,28 @@
 #include "tim.h"
 #include "usb_device.h"
 
+/****************************************通讯协议相关定义********************************************/
+// 帧头id
+#define PROTOCOL_HEAD_ID 0xAA
+
+// 命令字ID
+#define CMD_ID_NUC_DATA_RX 0x81 // 接收自瞄数据（上>下）
+#define CMD_ID_AUTOAIM_DATA_TX 0x14 // 发送自瞄数据（下>上）
+#define CMD_ID_REFEREE_DATA_TX 0x18 // 发送裁判系统（下>上）
+
+// 数据段长度，以字节为单位
+#define LENGTH_AUTOAIM_DATA_TX 12 // 自瞄所需的陀螺仪的数据长度（3个float)
+#define LENGTH_REFEREE_DATA_TX 50 // 决策所需的裁判系统数据长度
+#define PROTOCAL_HEAD_LENGTH 3	  // 协议头长度
+#define CRC_TAIL_LENGTH 1		  // 一帧数据末尾的CRC校验码长度
+
+/*******************************************END**********************************************/
+
 uint8_t NUC_USBD_RxBuf[USBD_RX_BUF_LENGHT], NUC_USBD_AutoAim_TxBuf[USBD_TX_BUF_LENGHT], NUC_USBD_Referee_TxBuf[USBD_TX_BUF_LENGHT];
 uint8_t yaw_rotate_flag_last = 0;
 
 AutoAim_Data_Tx AutoAim_Data_Transmit;
-AutoAim_Data_Rx AutoAim_Data_Receive;
+NUC_Data_Rx NUC_Data_Receive;
 Referee_Data_Tx Referee_Data_Tramsit;
 // 发送数据状态跟踪
 bool_t is_sending_referee = FALSE; // 标记是否正在发送referee数据
@@ -47,11 +64,13 @@ void NUC_Data_Unpack(void)
 {
 	switch (NUC_USBD_RxBuf[2])
 	{
-	case CMD_ID_AUTOAIM_DATA_RX:
+	case CMD_ID_NUC_DATA_RX:
 	{
-		yaw_rotate_flag_last = AutoAim_Data_Receive.yaw_rotate_flag;
-		memcpy(&AutoAim_Data_Receive, NUC_USBD_RxBuf + 3, sizeof(AutoAim_Data_Rx));
-		break;
+		static fp32 auto_aim_yaw_last;
+
+		yaw_rotate_flag_last = NUC_Data_Receive.yaw_rotate_flag;
+		memcpy(&NUC_Data_Receive, NUC_USBD_RxBuf + 3, sizeof(NUC_Data_Rx));
+			break;
 	}
 
 	default:
@@ -62,7 +81,7 @@ void NUC_Data_Unpack(void)
 void USBD_IRQHandler(uint8_t *Buf, uint16_t Len)
 {
 	memcpy(NUC_USBD_RxBuf, Buf, Len);
-	if (NUC_USBD_RxBuf[0] != 0xAA || NUC_USBD_RxBuf[1] > 128) // 帧头不匹配或者数据包长度错误，丢弃这一帧
+	if (NUC_USBD_RxBuf[0] != PROTOCOL_HEAD_ID || NUC_USBD_RxBuf[1] > 128) // 帧头不匹配或者数据包长度错误，丢弃这一帧
 		return;
 
 	if (NUC_USBD_RxBuf[1] == Len) // 校验数据包长度
@@ -74,7 +93,7 @@ void USBD_IRQHandler(uint8_t *Buf, uint16_t Len)
 void NUC_USBD_Tx(uint8_t cmdid)
 {
 	Protocol_Head_Data Protocol_Head;
-	Protocol_Head.Header = 0xAA;
+	Protocol_Head.Header = PROTOCOL_HEAD_ID;
 	Protocol_Head.Cmd_ID = cmdid;
 	switch (cmdid)
 	{
@@ -110,7 +129,7 @@ void NUC_USBD_Tx(uint8_t cmdid)
 		Referee_Data_Tramsit.coin_remaining_num = Bullet_Remaining.coin_remaining_num;
 		Referee_Data_Tramsit.bullet_remaining_num_17mm = Bullet_Remaining.bullet_remaining_num_17mm;
 
-		Referee_Data_Tramsit.red_1_HP = 1000; // 这个变量不知道为什么上位机接收解算会错误，其他变量都可以正常传输通讯，所以直接传个定值了
+		Referee_Data_Tramsit.red_1_HP = Game_Robot_HP.red_1_robot_HP;
 		Referee_Data_Tramsit.red_2_HP = Game_Robot_HP.red_2_robot_HP;
 		Referee_Data_Tramsit.red_3_HP = Game_Robot_HP.red_3_robot_HP;
 		Referee_Data_Tramsit.red_4_HP = Game_Robot_HP.red_4_robot_HP;
@@ -131,9 +150,9 @@ void NUC_USBD_Tx(uint8_t cmdid)
 		Referee_Data_Tramsit.hurt_reason = Robot_Hurt.hurt_type;
 		Referee_Data_Tramsit.enemy_hero_position = Student_Interactive_Data.enemy_hero_position_data;
 		Referee_Data_Tramsit.defend_fortress = Student_Interactive_Data.check_defend_fortress;
-		memcpy(NUC_USBD_Referee_TxBuf + 3, (uint8_t *)(&Referee_Data_Tramsit), LENGTH_REFEREE_DATA_TX);
+		memcpy(NUC_USBD_Referee_TxBuf + PROTOCAL_HEAD_LENGTH, (uint8_t *)(&Referee_Data_Tramsit), LENGTH_REFEREE_DATA_TX);
 
-		NUC_USBD_Referee_TxBuf[LENGTH_AUTOAIM_DATA_TX + PROTOCAL_HEAD_LENGTH] = CRC_Calculation(NUC_USBD_Referee_TxBuf, LENGTH_REFEREE_DATA_TX + PROTOCAL_HEAD_LENGTH);
+		NUC_USBD_Referee_TxBuf[LENGTH_REFEREE_DATA_TX + PROTOCAL_HEAD_LENGTH] = CRC_Calculation(NUC_USBD_Referee_TxBuf, LENGTH_REFEREE_DATA_TX + PROTOCAL_HEAD_LENGTH);
 
 		if (CDC_Transmit_FS(NUC_USBD_Referee_TxBuf, Protocol_Head.Length) != USBD_OK)
 		{

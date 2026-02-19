@@ -39,9 +39,14 @@
 			"gimbal_task.h": "c",
 			"usb_device.h": "c",
 			"queue.h": "c",
-			"can_send_task.h": "c",
+			"Can_Timer_Task.h": "c",
 			"bsp_can_chassis.h": "c",
-			"bsp_can_gimbal.h": "c"
+			"bsp_can_gimbal.h": "c",
+			"math.h": "c",
+			"stm32f4xx_hal_crc.h": "c",
+			"bsp_dmimu.h": "c",
+			"stm32f4xx_hal_def.h": "c",
+			"can.h": "c"
 		}
 	}
 }

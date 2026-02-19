@@ -13,13 +13,13 @@
  **********************************************************************************************************************************************/
 #include "bsp_can_gimbal.h"
 #include "bsp_dwt.h"
-#include "main.h"
 #include "motor.h"
 #include "detect_task.h"
 #include "user_common_lib.h"
+#include "bsp_DMIMU.h"
 #include "string.h"
 
-/************************达秒电机控制参数**********************************/
+/************************大yaw达秒电机控制参数**********************************/
 #define KP_MIN 0.0f
 #define KP_MAX 500.0f
 #define KD_MIN 0.0f
@@ -30,45 +30,32 @@
 #define T_MAX 15.0f
 #define P_MIN -12.56637f
 #define P_MAX 12.56637f
-/*********************************CAN接收ID*******************************************/
-#define BIG_YAW_DM6006_RecID 0x300 // CAN2
-
-#define SMALL_YAW_GM6020_RecID 0x205 // CAN1
-#define PITCH_GM6020_RecID 0x206     // CAN1
-#define FRIC1_M3508_RecID 0x201      // CAN1
-#define FRIC2_M3508_RecID 0x202      // CAN1
-#define DIAL_RecID 0x311             // CAN1，暂未确定电机型号，待定
-
-/*********************************CAN发送ID*******************************************/
-#define RC_TO_CHASSIS_FIRST_ID 0x102  // CAN2,向下板发送遥控器数据
-#define RC_TO_CHASSIS_SECOND_ID 0x100 // CAN2,发什么待定
-#define BIG_YAW_DM6006_TransID 0x01   // CAN2,DM6006
-
-#define SMALL_YAW_AND_PITCH_TransID 0x1FF // CAN1,两个6020一起发
-#define FRIC_M3508_TransID 0x200          // CAN1,两个3508一起发
-#define DIAL_TransID 0x312                // CAN1,暂未确定电机型号，待定
 /************************************************全局变量*******************************/
 CAN_RxHeaderTypeDef rx_header; // debug用，看can接收正不正常
 // int32_t trans_freq = 0; // can发送定时器的中断回调函数每秒执行次数，配合dwt使用
 /*********************************************CAN发送队列*********************************************************************/
 #define CAN_TX_QUEUE_LENGTH 128
-QueueHandle_t CAN1_send_queue; // CAN1消息队列句柄,此队列用于储存CAN1第一次发送失败的消息
-QueueHandle_t CAN2_send_queue; // CAN2消息队列句柄，此队列用于储存CAN2第一次发送失败的消息
+QueueHandle_t CAN1_send_queue; // CAN1消息队列句柄,此队列用于储存CAN1第一次发送的消息
+QueueHandle_t CAN2_send_queue; // CAN2消息队列句柄，此队列用于储存CAN2第一次发送的消息
 
-#define RC_TO_CHASSIS_FIRST_SEND_QUEUE CAN2_send_queue
-#define RC_TO_CHASSIS_SECOND_SEND_QUEUE CAN2_send_queue
+#define GIMBAL_TO_CHASSIS_FIRST_SEND_QUEUE CAN2_send_queue
+#define GIMBAL_TO_CHASSIS_SECOND_SEND_QUEUE CAN2_send_queue
+#define GIMBAL_TO_CHASSIS_THIRD_SEND_QUEUE CAN2_send_queue
+#define DIAL_SEND_QUEUE CAN2_send_queue
 #define BIG_YAW_DM6006_SEND_QUEUE CAN2_send_queue
 #define SMALL_YAW_AND_PITCH_SEND_QUEUE CAN1_send_queue
 #define FRIC_M3508_SEND_QUEUE CAN1_send_queue
-#define DIAL_SEND_QUEUE CAN1_send_queue
 /*********************************************CAN发送消息实例*********************************************************************/
-CanTxMsgTypeDef rc_to_chassis_first_send_msg;  // 传rc_ctrl.rc.ch数组的前四个元素的can报文
-CanTxMsgTypeDef rc_to_chassis_second_send_msg; // 传rc_ctrl.rc.ch数组的第五个元素和rc_ctrl.rc.s数组的can报文
-CanTxMsgTypeDef big_yaw_send_msg;              // 大yaw轴达妙6006 can报文
-CanTxMsgTypeDef small_yaw_and_pitch_send_msg;  // pitch轴，小yaw轴6020 can报文
-CanTxMsgTypeDef fric_send_msg;                 // 摩擦轮3508can报文
-CanTxMsgTypeDef dial_send_msg;                 // 拨弹盘can报文
+CanTxMsgTypeDef gimbal_to_chassis_first_send_msg;  // 传rc_ctrl到下板
+CanTxMsgTypeDef gimbal_to_chassis_second_send_msg; // 传导航和裁判系统数据到下板
+CanTxMsgTypeDef gimbal_to_chassis_third_send_msg;  // 传什么待定
+CanTxMsgTypeDef big_yaw_send_msg;                  // 大yaw轴达妙6006 can报文
+CanTxMsgTypeDef small_yaw_and_pitch_send_msg;      // pitch轴，小yaw轴6020 can报文
+CanTxMsgTypeDef fric_send_msg;                     // 摩擦轮3508can报文
+CanTxMsgTypeDef dial_send_msg;                     // 拨弹盘can报文
 
+uint16_t can_err_cnt[3];
+uint16_t can_rec_cnt[3];
 /**
  * @description: 配置can过滤器，开启can外设以及需要的中断
  * @return 无
@@ -108,14 +95,15 @@ void Can_Msg_Init(void)
         CanTxMsgTypeDef *msg;
         uint32_t stdId;
     } buffer_list[] = {
-        {&rc_to_chassis_first_send_msg, RC_TO_CHASSIS_FIRST_ID},
-        {&rc_to_chassis_second_send_msg, RC_TO_CHASSIS_SECOND_ID},
+        {&gimbal_to_chassis_first_send_msg, GIMBAL_TO_CHASSIS_FIRST_ID},
+        {&gimbal_to_chassis_second_send_msg, GIMBAL_TO_CHASSIS_SECOND_ID},
+        {&gimbal_to_chassis_third_send_msg, GIMBAL_TO_CHASSIS_THIRD_ID},
         {&big_yaw_send_msg, BIG_YAW_DM6006_TransID},
         {&small_yaw_and_pitch_send_msg, SMALL_YAW_AND_PITCH_TransID},
         {&fric_send_msg, FRIC_M3508_TransID},
         {&dial_send_msg, DIAL_TransID}};
 
-    // 对于dm以外的电机，初始化为0。对于dm电机需要经过dm协议转换，不能直接赋0！！！！！！！！
+    // 对于dm以外的电机，初始化为0。对于dm电机需要经过dm协议转换，不能直接赋0,因为DM电机目标电流为0时对应的msg->data并不是0，如果对msg->data赋0，电机会有疯转风险！！！
     for (size_t i = 0; i < sizeof(buffer_list) / sizeof(buffer_list[0]); i++)
     {
         buffer_list[i].msg->tx_header.IDE = CAN_ID_STD;             // 标准帧
@@ -167,6 +155,41 @@ void Create_Can_Send_Queues()
 /*********************************************CAN接收函数*********************************************************************/
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
+//		static int32_t trans = 0;
+//    static int flag = 0;
+//    static float start_time = 0;
+
+//    if (flag == 0)
+//    {
+//    	start_time = DWT_GetTimeline_ms();
+//    	flag = 1;
+//    trans = 0;
+//    }
+//    if (flag == 1)
+//    {
+//			trans++;
+//    	if (DWT_GetTimeline_ms() - start_time > 1000)
+//    	{
+//    		flag = 0;
+//    		trans = 0;
+//            if(can_rec_cnt[0] < 480)
+//            {
+//                can_err_cnt[0]++;
+//            }
+//            if (can_rec_cnt[1] < 300)
+//            {
+//                can_err_cnt[1]++;
+//            }
+//            if (can_rec_cnt[2] < 850)
+//            {
+//                can_err_cnt[2]++;
+//            }
+
+//            for (int j = 0; j < 3; j++)
+//                        can_rec_cnt[j] = 0;
+//        }
+//    }
+    
     uint8_t rx_data[8];
     if (hcan == &hcan1)
     {
@@ -178,8 +201,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         case FRIC2_M3508_RecID:
         {
             uint8_t i = rx_header.StdId - FRIC1_M3508_RecID;
-            get_motor_measure(&motor_measure_shoot[i], rx_data);
-            // detect_hook(CHASSIS_MOTOR1_TOE + i);
+            get_motor_measure(&motor_measure_fric[i], rx_data);
             break;
         }
         case SMALL_YAW_GM6020_RecID:
@@ -201,7 +223,10 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     if (hcan == &hcan2)
     {
         HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data);
-        if (rx_header.StdId == BIG_YAW_DM6006_RecID)
+
+        switch (rx_header.StdId)
+        {
+        case BIG_YAW_DM6006_RecID:
         {
             DM_big_yaw_motor.id = (rx_data[0]) & 0x0F;
             DM_big_yaw_motor.state = (rx_data[0]) >> 4;
@@ -213,10 +238,37 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             DM_big_yaw_motor.toq = uint_to_float(DM_big_yaw_motor.t_int, T_MIN, T_MAX, 12);
             DM_big_yaw_motor.Tmos = (float)(rx_data[6]);
             DM_big_yaw_motor.Tcoil = (float)(rx_data[7]);
+
+//            if(trans == 1)
+//            {
+//                can_rec_cnt[0]++;
+//            }
+            break;
+        }
+        case BIG_YAW_DMIMU_RecID:
+        {
+            IMU_UpdateData(rx_data);
+            detect_hook(DM_IMU_TOE);
+
+//            if (trans == 1)
+//            {
+//                can_rec_cnt[2]++;
+//            }
+            break;
+        }
+        case DIAL_RecID:
+        {
+            get_motor_measure_LK(&motor_measure_dial, rx_data);
+            detect_hook(DIAL_MOTOR_TOE);
+//            if (trans == 1)
+//            {
+//                can_rec_cnt[1]++;
+//            }
+            break;
+        }
         }
     }
 }
-
 /*********************************************************填充CAN消息数据域************************************************************************/
 /**
  * @description: 将待发送的can报文送入对应的发送队列，在CAN_TX_TimerIRQHandler()函数中将缓冲区中的can报文统一定时发送
@@ -232,24 +284,34 @@ void Allocate_Can_Msg(int16_t data1, int16_t data2, int16_t data3, int16_t data4
     // 根据命令ID，让指针指向对应的缓冲区
     switch (can_cmd_id)
     {
-    case CAN_RC_TO_CHASSIS_FIRST_CMD:
+    case CAN_GIMBAL_TO_CHASSIS_FIRST_CMD:
     {
         for (int i = 0; i < 4; i++)
         {
-            rc_to_chassis_first_send_msg.data[2 * i] = (data_array[i] >> 8) & 0xFF; // 高8位
-            rc_to_chassis_first_send_msg.data[2 * i + 1] = data_array[i] & 0xFF;    // 低8位
+            gimbal_to_chassis_first_send_msg.data[2 * i] = (data_array[i] >> 8) & 0xFF; // 高8位
+            gimbal_to_chassis_first_send_msg.data[2 * i + 1] = data_array[i] & 0xFF;    // 低8位
         }
-        xQueueSend(RC_TO_CHASSIS_FIRST_SEND_QUEUE, &rc_to_chassis_first_send_msg, 0); // 向队列中填充内容
+        xQueueSend(GIMBAL_TO_CHASSIS_FIRST_SEND_QUEUE, &gimbal_to_chassis_first_send_msg, 0); // 向队列中填充内容
         break;
     }
-    case CAN_RC_TO_CHASSIS_SECOND_CMD:
+    case CAN_GIMBAL_TO_CHASSIS_SECOND_CMD:
     {
         for (int i = 0; i < 4; i++)
         {
-            rc_to_chassis_second_send_msg.data[2 * i] = (data_array[i] >> 8) & 0xFF; // 高8位
-            rc_to_chassis_second_send_msg.data[2 * i + 1] = data_array[i] & 0xFF;    // 低8位
+            gimbal_to_chassis_second_send_msg.data[2 * i] = data_array[i] & 0xFF;            // 低8位
+            gimbal_to_chassis_second_send_msg.data[2 * i + 1] = (data_array[i] >> 8) & 0xFF; // 高8位
         }
-        xQueueSend(RC_TO_CHASSIS_SECOND_SEND_QUEUE, &rc_to_chassis_second_send_msg, 0); // 向队列中填充内容
+        xQueueSend(GIMBAL_TO_CHASSIS_SECOND_SEND_QUEUE, &gimbal_to_chassis_second_send_msg, 0); // 向队列中填充内容
+        break;
+    }
+    case CAN_GIMBAL_TO_CHASSIS_THIRD_CMD:
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            gimbal_to_chassis_third_send_msg.data[2 * i] = (data_array[i] >> 8) & 0xFF; // 高8位
+            gimbal_to_chassis_third_send_msg.data[2 * i + 1] = data_array[i] & 0xFF;    // 低8位
+        }
+        xQueueSend(GIMBAL_TO_CHASSIS_THIRD_SEND_QUEUE, &gimbal_to_chassis_third_send_msg, 0); // 向队列中填充内容
         break;
     }
     case CAN_BIG_YAW_CMD:
@@ -286,8 +348,8 @@ void Allocate_Can_Msg(int16_t data1, int16_t data2, int16_t data3, int16_t data4
     {
         for (int i = 0; i < 4; i++)
         {
-            dial_send_msg.data[2 * i] = (data_array[i] >> 8) & 0xFF; // 高8位
-            dial_send_msg.data[2 * i + 1] = data_array[i] & 0xFF;    // 低8位
+            dial_send_msg.data[2 * i] = data_array[i] & 0xFF;            // 低8位
+            dial_send_msg.data[2 * i + 1] = (data_array[i] >> 8) & 0xFF; // 高8位
         }
         xQueueSend(DIAL_SEND_QUEUE, &dial_send_msg, 0); // 向队列中填充内容
         break;
@@ -300,8 +362,8 @@ void Allocate_Can_Msg(int16_t data1, int16_t data2, int16_t data3, int16_t data4
 void Ctrl_DM_Motor(float _pos, float _vel, float _KP, float _KD, float _torq) // can2
 {
     uint16_t pos_tmp, vel_tmp, kp_tmp, kd_tmp, tor_tmp;
-    pos_tmp = float_to_uint(_pos, -12.5, 12.5, 16);
-    vel_tmp = float_to_uint(_vel, -45, 45, 12);
+    pos_tmp = float_to_uint(_pos, P_MIN, P_MAX, 16);
+    vel_tmp = float_to_uint(_vel, V_MIN, V_MAX, 12);
     kp_tmp = float_to_uint(_KP, KP_MIN, KP_MAX, 12);
     kd_tmp = float_to_uint(_KD, KD_MIN, KD_MAX, 12);
     tor_tmp = float_to_uint(_torq, T_MIN, T_MAX, 12);

@@ -9,9 +9,6 @@ void LED_Task(void const * argument)
 	while(1)
 	{
 		HAL_GPIO_TogglePin(GPIOH,GPIO_PIN_10);
-		vTaskDelay(5);
-
-	
-
+		vTaskDelay(10);
 	}
 }

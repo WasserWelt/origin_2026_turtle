@@ -14,22 +14,10 @@ typedef struct
 
 } Melody_TypeDef;
 
-void buzzer_on(uint16_t freq, uint16_t pwm)
-{
-    uint16_t psc = (TIM_CLK/(freq*TIM4_ARR))-1;
-    __HAL_TIM_PRESCALER(&htim4, psc);
-    __HAL_TIM_SetCompare(&htim4, TIM_CHANNEL_3, pwm);
-
-}
-void buzzer_off(void)
-{
-    __HAL_TIM_SetCompare(&htim4, TIM_CHANNEL_3, 0);
-}
-
 static Melody_TypeDef melody_eva[] = {
     {220, 500, 20000}, {261, 500,20000}, {293, 400,20000}, {261, 300,20000},   
      {293, 300,20000},{10, 10,0}, {293, 250,20000},{10, 10,0},{293, 250,20000}, {392,300,20000},
-	  {349, 300,20000},{330,200,20000},{294, 200,20000},{330,200,20000},{0,0,0}
+      {349, 300,20000},{330,200,20000},{294, 200,20000},{330,200,20000},{0,0,0}
 };
 
 static Melody_TypeDef melody_mao[] = {
@@ -67,27 +55,41 @@ static Melody_TypeDef melody_mao[] = {
 {452,267,20000},
 {152,69,20000},
 };
+void buzzer_on(uint16_t freq, uint16_t pwm)
+{
+    uint16_t psc = (TIM_CLK/(freq*TIM4_ARR))-1;
+    __HAL_TIM_PRESCALER(&htim4, psc);
+    __HAL_TIM_SetCompare(&htim4, TIM_CHANNEL_3, pwm);
 
-void buzzer_play_eva(void)
+}
+void buzzer_off(void)
+{
+    __HAL_TIM_SetCompare(&htim4, TIM_CHANNEL_3, 0);
+}
+
+// 通用的蜂鸣器播放函数
+void buzzer_play(Melody_TypeDef *melody)
 {
     uint8_t i = 0;
-    while(melody_eva[i].duration != 0)
+
+    // 遍历旋律数组，直到遇到duration为0的结构体（结束标志）
+    while (melody[i].duration != 0)
     {
-        buzzer_on(melody_eva[i].freq, melody_eva[i].pwm);
-        HAL_Delay(melody_eva[i].duration);
+        buzzer_on(melody[i].freq, melody[i].pwm);
+        HAL_Delay(melody[i].duration);
         i++;
     }
     buzzer_off();
 }
 
+// 播放EVA旋律
+void buzzer_play_eva(void)
+{
+    buzzer_play(melody_eva);
+}
+
+// 播放毛毛完整形态坐牢の小曲
 void buzzer_play_mao(void)
 {
-    uint8_t i = 0;
-    while(melody_mao[i].duration != 0)
-    {
-        buzzer_on(melody_mao[i].freq, melody_mao[i].pwm);
-        HAL_Delay(melody_mao[i].duration);
-        i++;
-    }
-    buzzer_off();
+    buzzer_play(melody_mao);
 }

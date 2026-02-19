@@ -259,18 +259,11 @@ static void detect_init(uint32_t time)
     //设置离线时间，上线稳定工作时间，优先级 offlineTime onlinetime priority
     uint16_t set_item[ERROR_LIST_LENGHT][3] =
         {
-            {30, 40, 15},   //SBUS
-            {10, 10, 11},   //motor1
-            {10, 10, 10},   //motor2
-            {10, 10, 9},    //motor3
-            {10, 10, 8},    //motor4
-            {2, 3, 14},     //yaw
-            {2, 3, 13},     //pitch
-            {10, 10, 12},   //trigger
-            {2, 3, 7},      //board gyro
-            {5, 5, 7},      //board accel
-            {40, 200, 7},   //board mag
-            {100, 100, 5},  //referee
+            {30, 40, 15}, // SBUS
+            {5, 40, 15}, // DM_IMU
+            {10, 30, 14},     // dial motor
+            {7, 3, 7},     // board gyro
+            {7, 5, 7},     // board accel
         };
 
     for (uint8_t i = 0; i < ERROR_LIST_LENGHT; i++)
@@ -292,13 +285,4 @@ static void detect_init(uint32_t time)
         error_list[i].lost_time = time;
         error_list[i].work_time = time;
     }
-
-//    error_list[OLED_TOE].data_is_error_fun = NULL;
-//    error_list[OLED_TOE].solve_lost_fun = OLED_com_reset;
-//    error_list[OLED_TOE].solve_data_error_fun = NULL;
-
-//    error_list[DBUSTOE].dataIsErrorFun = RC_data_is_error;
-//    error_list[DBUSTOE].solveLostFun = slove_RC_lost;
-//    error_list[DBUSTOE].solveDataErrorFun = slove_data_error;
-
 }

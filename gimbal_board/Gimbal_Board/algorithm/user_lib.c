@@ -1,7 +1,7 @@
 #include "user_lib.h"
 #include "arm_math.h"
 
-//快速开方
+//快速开方倒数
 fp32 invSqrt(fp32 num)
 {
     fp32 halfnum = 0.5f * num;

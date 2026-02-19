@@ -335,7 +335,7 @@ void Sentry_To_Lidar_Cmd(Sentry_Interactive_With_Liadr_t *Sentry_Interactive_Wit
 
 	/* Ìî³ä sentry_cmd */
 	Sentry_Interactive_With_Lidar_Cmd->sentry_interactive_data.bullet_remaining_num = Bullet_Remaining.bullet_remaining_num_17mm;
-	Sentry_Interactive_With_Lidar_Cmd->sentry_interactive_data.reach_enemy_hero = AutoAim_Data_Receive.ready_catch_hero;
+	Sentry_Interactive_With_Lidar_Cmd->sentry_interactive_data.reach_enemy_hero = NUC_Data_Receive.ready_catch_hero;
 	//	Sentry_Interactive_With_Lidar_Cmd->sentry_interactive_data.bullet_remaining_num = 100;
 	//	Sentry_Interactive_With_Lidar_Cmd->sentry_interactive_data.reach_enemy_hero = 1;
 	Sentry_Interactive_With_Lidar_Cmd->CRC16 = CRC16_Calculate((uint8_t *)Sentry_Interactive_With_Lidar_Cmd, sizeof(Sentry_Interactive_With_Liadr_t) - 2); // frame_tail CRC16Ð£Ñé

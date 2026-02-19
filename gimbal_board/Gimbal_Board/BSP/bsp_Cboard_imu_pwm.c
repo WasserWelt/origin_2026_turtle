@@ -1,4 +1,4 @@
-#include "bsp_imu_pwm.h"
+#include "bsp_Cboard_imu_pwm.h"
 #include "main.h"
 
 extern TIM_HandleTypeDef htim10;

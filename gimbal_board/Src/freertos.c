@@ -53,6 +53,7 @@ osThreadId Gimbal_TASKHandle;
 osThreadId Shoot_TASKHandle;
 osThreadId referee_usartHandle;
 osThreadId Detect_TaskHandle;
+osThreadId Send_ChassisHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -65,6 +66,7 @@ void Gimbal_Task(void const * argument);
 void Shoot_Task(void const * argument);
 void referee_usart_task(void const * argument);
 void detect_task(void const * argument);
+void Send_Chassis_Task(void const * argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -136,21 +138,25 @@ void MX_FREERTOS_Init(void) {
   osThreadDef(LED_TASK, LED_Task, osPriorityNormal, 0, 128);
   LED_TASKHandle = osThreadCreate(osThread(LED_TASK), NULL);
 
-  /* definition and creation of Gimbal_TASK */
-  osThreadDef(Gimbal_TASK, Gimbal_Task, osPriorityHigh, 0, 512);
+  // /* definition and creation of Gimbal_TASK */
+  osThreadDef(Gimbal_TASK, Gimbal_Task, osPriorityHigh, 0, 1024);
   Gimbal_TASKHandle = osThreadCreate(osThread(Gimbal_TASK), NULL);
 
-  /* definition and creation of Shoot_TASK */
-  osThreadDef(Shoot_TASK, Shoot_Task, osPriorityNormal, 0, 512);
+  // /* definition and creation of Shoot_TASK */
+  osThreadDef(Shoot_TASK, Shoot_Task, osPriorityAboveNormal, 0, 512);
   Shoot_TASKHandle = osThreadCreate(osThread(Shoot_TASK), NULL);
 
-  /* definition and creation of referee_usart */
-  osThreadDef(referee_usart, referee_usart_task, osPriorityAboveNormal, 0, 256);
+  // /* definition and creation of referee_usart */
+  osThreadDef(referee_usart, referee_usart_task, osPriorityHigh, 0, 256);
   referee_usartHandle = osThreadCreate(osThread(referee_usart), NULL);
 
-  /* definition and creation of Detect_Task */
+  // /* definition and creation of Detect_Task */
   osThreadDef(Detect_Task, detect_task, osPriorityAboveNormal, 0, 256);
   Detect_TaskHandle = osThreadCreate(osThread(Detect_Task), NULL);
+
+  // /* definition and creation of Send_Chassis */
+  osThreadDef(Send_Chassis, Send_Chassis_Task, osPriorityHigh, 0, 256);
+  Send_ChassisHandle = osThreadCreate(osThread(Send_Chassis), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -167,8 +173,6 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE END Header_INS_Task */
 __weak void INS_Task(void const * argument)
 {
-  /* init code for USB_DEVICE */
-  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN INS_Task */
   /* Infinite loop */
   for(;;)
@@ -266,6 +270,24 @@ __weak void detect_task(void const * argument)
     osDelay(1);
   }
   /* USER CODE END detect_task */
+}
+
+/* USER CODE BEGIN Header_Send_Chassis_Task */
+/**
+* @brief Function implementing the Send_Chassis thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_Send_Chassis_Task */
+__weak void Send_Chassis_Task(void const *argument)
+{
+  /* USER CODE BEGIN Send_Chassis_Task */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END Send_Chassis_Task */
 }
 
 /* Private application code --------------------------------------------------*/

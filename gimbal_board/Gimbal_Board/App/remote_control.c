@@ -21,7 +21,6 @@
 #include "remote_control.h"
 #include "main.h"
 #include "string.h"
-#include "bsp_can.h"
 #include "detect_task.h"
 
 // 遥控器出错数据上限

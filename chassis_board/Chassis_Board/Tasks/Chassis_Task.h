@@ -8,68 +8,87 @@
 #ifndef _CHASSIS_TASK
 #define _CHASSIS_TASK
 
+#include "struct_typedef.h"
+#include "pid.h"
+
 //底盘运动学解算相关参数
-#define MOTOR_DISTANCE_TO_CENTER 0.237f // 舵轮与地面的接触点到车体中心的距离
+#define MOTOR_DISTANCE_TO_CENTER 0.2899f // 舵轮与地面的接触点到车体中心的距离
+#define MOTOR_DISTANCE_WIDTH 0.41f // 底盘较短的轮距
+#define MOTOR_DISTANCE_LENGTH 0.41f // 底盘较长的轮距
 #define WHEEL_RADIUS 0.06f  //舵轮半径
 #define MOTOR_REDUCTION_RATIO 13.72f  // 轮电机减速比
-#define CHASSIS_FOLLOW_GIMBAL_BACK_ZERO 268.41f  //底盘跟随云台时的后零点，单位：度
-#define CHASSIS_FOLLOW_GIMBAL_RIGHT_ZERO 358.41f // 底盘跟随云台时的右零点
-#define CHASSIS_FOLLOW_GIMBAL_LEFT_ZERO 178.41f  // 底盘跟随云台时的左零点
-#define CHASSIS_FOLLOW_GIMBAL_ZERO 88.41f       // 底盘跟随云台时的零点，同时也是小陀螺模式下底盘vx(前进)正方向
+#define CHASSIS_FOLLOW_GIMBAL_BACK_ZERO 188.55f  //底盘跟随云台时的后零点，单位：度
+#define CHASSIS_FOLLOW_GIMBAL_RIGHT_ZERO 278.55f // 底盘跟随云台时的右零点
+#define CHASSIS_FOLLOW_GIMBAL_LEFT_ZERO 98.55f  // 底盘跟随云台时的左零点
+#define CHASSIS_FOLLOW_GIMBAL_ZERO 8.55f       // 底盘跟随云台时的零点，同时也是小陀螺模式下底盘vx(前进)正方向
 
-#define STEER_MOROR1_ENC_OFFSET 6906 //1号舵电机的编码器偏置（范围0-8191）
-#define STEER_MOROR2_ENC_OFFSET 1467 //2号舵电机的编码器偏置（范围0-8191）
-#define STEER_MOROR3_ENC_OFFSET 6232 //3号舵电机的编码器偏置（范围0-8191）
-#define STEER_MOROR4_ENC_OFFSET 503 //4号舵电机的编码器偏置（范围0-8191）
+#define STEER_MOROR1_ENC_OFFSET 30 //1号舵电机的编码器偏置（范围0-8191）
+#define STEER_MOROR2_ENC_OFFSET 5606 //2号舵电机的编码器偏置（范围0-8191）
+#define STEER_MOROR3_ENC_OFFSET 6834 //3号舵电机的编码器偏置（范围0-8191）
+#define STEER_MOROR4_ENC_OFFSET 4065 //4号舵电机的编码器偏置（范围0-8191）
 
 //小陀螺相关参数
-#define ROTATE_WZ_MAX 10.0  // 遥控模式下小陀螺正向速度，单位：rad/s
-#define ROTATE_WZ_MIN -5.0 // 遥控模式下小陀螺反向速度
+#define ROTATE_WZ_MAX 12.0  // 小陀螺正向速度,高速，单位：rad/s
+#define ROTATE_WZ_MEDIUM -5.0 // 小陀螺反向速度，中速
+#define ROTATE_WZ_MIN 0.0 // 小陀螺模式，但不转，在导航模式下省功率
 #define ROTATE_SAVE_ENERGY 0.3f     // 哨兵未被弹丸击打时将目标小陀螺转速乘以此系数，达到低速小陀螺省功率的效果
 #define ROTATE_MOVE_FF_HIGH_SPEED 0.04f // 高速小陀螺模式下的前馈系数
 #define ROTATE_MOVE_FF_LOW_SPEED 0.02f  //低速率小陀螺模式下的前馈系数
-
-//功率控制相关参数
-#define NO_JUDGE_TOTAL_CURRENT_LIMIT 64000.0f
-#define BUFFER_TOTAL_CURRENT_LIMIT 30000.0f
-#define POWER_TOTAL_CURRENT_LIMIT 30000.0f
-#define WARNING_POWER_BUFF 60.0f
+#define NAV_MAX_SPEED 4.0f // 导航模式下底盘最大速度，单位m/s
 
 //底盘控制参数（pid,前馈）
-#define WHEEL_MOTOR_SPEED_PID_KP 8.5f
+#define WHEEL_MOTOR_SPEED_PID_KP 10.5f
 #define WHEEL_MOTOR_SPEED_PID_KI 0.002f
 #define WHEEL_MOTOR_SPEED_PID_KD 0.0f
 #define WHEEL_MOTOR_SPEED_PID_MAX_OUT 16000.0f
 #define WHEEL_MOTOR_SPEED_PID_MAX_IOUT 2000.0f
 
-#define STEER_MOTOR_SPEED_PID_KP 160.0f
+#define STEER_MOTOR_SPEED_PID_KP 100.0f
 #define STEER_MOTOR_SPEED_PID_KI 0.02f 
 #define STEER_MOTOR_SPEED_PID_KD 0.0f
-#define STEER_MOTOR_SPEED_PID_MAX_OUT 20000.0f
+#define STEER_MOTOR_SPEED_PID_MAX_OUT 16000.0f
 #define STEER_MOTOR_SPEED_PID_MAX_IOUT 1000.0f
 #define STEER_MOTOR_SPEED_FF 1.4f // 舵轮电机速度前馈系数
 
-#define STEER_MOTOR_ANGLE_PID_KP 5.0f
+#define STEER_MOTOR_ANGLE_PID_KP 10.0f
 #define STEER_MOTOR_ANGLE_PID_KI 0.0002f
 #define STEER_MOTOR_ANGLE_PID_KD 1.5f
-#define STEER_MOTOR_ANGLE_PID_MAX_OUT 1200.0f
+#define STEER_MOTOR_ANGLE_PID_MAX_OUT 1500.0f
 #define STEER_MOTOR_ANGLE_PID_MAX_IOUT 100.0f
 
-#define CHASSIS_FOLLOW_GIMBAL_PID_KP 70.0f
+#define CHASSIS_FOLLOW_GIMBAL_PID_KP 100.0f
 #define CHASSIS_FOLLOW_GIMBAL_PID_KI 0.0005f
-#define CHASSIS_FOLLOW_GIMBAL_PID_KD 12.5f
+#define CHASSIS_FOLLOW_GIMBAL_PID_KD 70.0f
 #define CHASSIS_FOLLOW_GIMBAL_PID_MAX_OUT 6500.0f //20000.0f
 #define CHASSIS_FOLLOW_GIMBAL_PID_MAX_IOUT 450.0f
 
-//自主导航时的参数
-#define NAV_SPEED_FAST 800.0f // 导航发过来的速度乘以的系数，非上坡用
+#define BUFFER_ENERGY_PID_KP 1.0f
+#define BUFFER_ENERGY_PID_KI 0.0002f
+#define BUFFER_ENERGY_PID_KD 0.0f
+#define BUFFER_ENERGY_PID_MAX_OUT 30.0f
+#define BUFFER_ENERGY_PID_MAX_IOUT 10.0f
 
 //量纲转换参数
-#define DM6006_ENC_TO_DEGREE 0.021972f  //  360/16384
-#define GM6020_ENC_TO_DEGREE 0.043945f  //  360/8192
+#define PI 3.141592f
+#define M_PER_SEC_TO_RPM 2183.6f          // m/s转rpm(注意，与舵轮半径和轮电机减速比有关)公式为 60*MOTOR_REDUCTION_RATIO/（2*pi*WHEEL_RADIUS)
 #define DEGREE_TO_RAD 0.0172532f  //  pi/180
 #define RAD_TO_DEGREE 57.295779f
-#define PI 3.141592f
+#define DM6006_ENC_TO_DEGREE 0.021972f  //  360/16384
+#define GM6020_ENC_TO_DEGREE 0.043945f  //  360/8192
+
+typedef struct // 上板传下来的导航相关数据
+{
+    fp32 vx;
+    fp32 vy;
+    uint8_t chassis_target_mode;
+    uint8_t updownhill_state;
+    uint8_t health_state;
+    uint8_t buffer_energy_remain;
+    uint8_t referee_power_limit;
+    uint8_t total_ernergy_remain;
+} nav_ctrl_t;
+
+extern nav_ctrl_t nav_ctrl;
 
 void Chassis_Task(void const *argument);
 

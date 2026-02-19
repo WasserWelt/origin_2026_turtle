@@ -25,7 +25,7 @@
 #define INS_Task_H
 #include "struct_typedef.h"
 
-#define IMU_Temp_Set 45
+#define IMU_Temp_Set 25
 
 #define SPI_DMA_GYRO_LENGHT       8
 #define SPI_DMA_ACCEL_LENGHT      9
@@ -181,5 +181,5 @@ extern const fp32 *get_accel_data_point(void);
   * @retval         INS_magµÄÖ¸Õë
   */
 extern const fp32 *get_mag_data_point(void);
-extern  void DMA2_Stream2_IRQHandler_1(void);
+void DMA2_Stream2_IRQHandler_1(void);
 #endif

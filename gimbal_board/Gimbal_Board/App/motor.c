@@ -13,11 +13,13 @@ motor_measure_t motor_measure_steer[4] = {0};  // 底盘舵电机6020
 motor_measure_t motor_measure_wheel[4] = {0};  // 底盘轮电机3508
 motor_measure_t motor_measure_small_yaw = {0}; // 小yaw电机6020
 motor_measure_t motor_measure_pitch = {0};     // pitch 6020
-motor_measure_t motor_measure_shoot[2] = {0};  // 摩擦轮电机3508
-
+motor_measure_t motor_measure_fric[2] = {0};  // 摩擦轮电机3508
+LK_motor_measure_t motor_measure_dial = {0}; // 拨弹盘电机
 /***********************电机控制结构体***********************************/
 chassis_steer_motor_t chassis_steer_motor[4] = {0};
 chassis_wheel_motor_t chassis_wheel_motor[4] = {0};
 gimbal_motor_t gimbal_small_yaw_motor = {0};
 gimbal_motor_t gimbal_pitch_motor = {0};
 DM_motor_data_t DM_big_yaw_motor = {0}; // 达秒电机的反馈值已经包含在DM_motor_data_t中
+fric_motor_t fric_motor[2] = {0};
+dial_motor_t LK_dial_motor = {0};

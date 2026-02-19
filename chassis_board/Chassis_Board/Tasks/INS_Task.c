@@ -24,7 +24,7 @@
 
 #include "cmsis_os.h"
 
-#include "bsp_imu_pwm.h"
+#include "bsp_Cboard_imu_pwm.h"
 #include "bsp_spi.h"
 #include "bmi088driver.h"
 #include "ist8310driver.h"
@@ -141,7 +141,7 @@ fp32 mag_cali_offset[3];
 
 static uint8_t first_temperate;
 static const fp32 imu_temp_PID[3] = {TEMPERATURE_PID_KP, TEMPERATURE_PID_KI, TEMPERATURE_PID_KD};
-static pid_type_def imu_temp_pid;
+pid_type_def imu_temp_pid;
 
 static const float timing_time = 0.001f; // tast run time , unit s.�������е�ʱ�� ��λ s
 
@@ -195,7 +195,6 @@ void INS_Task(void const *pvParameters)
   //    accel_fliter_1[1] = accel_fliter_2[1] = accel_fliter_3[1] = INS_accel[1];
   //    accel_fliter_1[2] = accel_fliter_2[2] = accel_fliter_3[2] = INS_accel[2];
   // get the handle of task
-  // ��ȡ��ǰ�������������?
   INS_Task_local_handler = xTaskGetHandle(pcTaskGetName(NULL));
 
   // set spi frequency
@@ -210,10 +209,10 @@ void INS_Task(void const *pvParameters)
 
   imu_start_dma_flag = 1;
 
-  bmi088_offset_data.gyro[0] = 0.001501f;  // 0.003014246 0.0026156781
-  bmi088_offset_data.gyro[1] = -0.003215f; // 0.003816946 0.00357805f
-  bmi088_offset_data.gyro[2] = -0.000523;  // 0.000855558 0.0007927699f
-                                           //  mpu_offset_clc();
+  bmi088_offset_data.gyro[0] = 0.00119122316f;
+  bmi088_offset_data.gyro[1] = 0.00573810469f;
+  bmi088_offset_data.gyro[2] = 0.00305616786f;
+//  mpu_offset_clc();
 
   while (1)
   {
@@ -531,7 +530,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   {
     imu_read_flag = 1;
     // wake up the task
-    // ��������
     if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
     {
       static BaseType_t xHigherPriorityTaskWoken;
@@ -644,7 +642,7 @@ void DMA2_Stream2_IRQHandler_1(void)
 void mpu_offset_clc(void)
 {
   static uint32_t i = 0, j = 0;
-  while (i < 300000 || j < 300000)
+  while (i < 8000 || j < 8000)
   {
     while (imu_read_flag == 0)
     {
@@ -652,7 +650,7 @@ void mpu_offset_clc(void)
     imu_read_flag = 0;
     if (gyro_update_flag & (1 << IMU_UPDATE_SHFITS))
     {
-      if (i < 300000)
+      if (i < 8000)
       {
         gyro_update_flag &= ~(1 << IMU_UPDATE_SHFITS);
         BMI088_gyro_read_over(gyro_dma_rx_buf + BMI088_GYRO_RX_BUF_DATA_OFFSET, bmi088_real_data.gyro);
@@ -660,18 +658,18 @@ void mpu_offset_clc(void)
         bmi088_offset_data.gyro[1] += bmi088_real_data.gyro[1];
         bmi088_offset_data.gyro[2] += bmi088_real_data.gyro[2];
       }
-      else if (i == 300000)
+      else if (i == 8000)
       {
-        bmi088_offset_data.gyro[0] = bmi088_offset_data.gyro[0] / 300000.0f;
-        bmi088_offset_data.gyro[1] = bmi088_offset_data.gyro[1] / 300000.0f;
-        bmi088_offset_data.gyro[2] = bmi088_offset_data.gyro[2] / 300000.0f;
+        bmi088_offset_data.gyro[0] = bmi088_offset_data.gyro[0] / 8000.0f;
+        bmi088_offset_data.gyro[1] = bmi088_offset_data.gyro[1] / 8000.0f;
+        bmi088_offset_data.gyro[2] = bmi088_offset_data.gyro[2] / 8000.0f;
       }
       i++;
     }
 
     if (accel_update_flag & (1 << IMU_UPDATE_SHFITS))
     {
-      if (j < 300000)
+      if (j < 8000)
       {
         accel_update_flag &= ~(1 << IMU_UPDATE_SHFITS);
         BMI088_accel_read_over(accel_dma_rx_buf + BMI088_ACCEL_RX_BUF_DATA_OFFSET, bmi088_real_data.accel, &bmi088_real_data.time);
@@ -679,11 +677,11 @@ void mpu_offset_clc(void)
         bmi088_offset_data.accel[1] += bmi088_real_data.accel[1];
         bmi088_offset_data.accel[2] += bmi088_real_data.accel[2];
       }
-      else if (j == 300000)
+      else if (j == 8000)
       {
-        bmi088_offset_data.accel[0] = bmi088_offset_data.accel[0] / 300000.0f;
-        bmi088_offset_data.accel[1] = bmi088_offset_data.accel[1] / 300000.0f;
-        bmi088_offset_data.accel[2] = bmi088_offset_data.accel[2] / 300000.0f;
+        bmi088_offset_data.accel[0] = bmi088_offset_data.accel[0] / 8000.0f;
+        bmi088_offset_data.accel[1] = bmi088_offset_data.accel[1] / 8000.0f;
+        bmi088_offset_data.accel[2] = bmi088_offset_data.accel[2] / 8000.0f;
       }
       j++;
     }

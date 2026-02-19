@@ -32,8 +32,9 @@
 /* USER CODE BEGIN Includes */
 #include "remote_control.h"
 #include "bsp_can_chassis.h"
-#include "Can_Send_Task.h"
+#include "Can_Timer_Task.h"
 #include "bsp_dwt.h"
+#include "bsp_buzzer.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -102,7 +103,7 @@ int main(void)
   MX_I2C3_Init();
   MX_SPI1_Init();
   MX_TIM10_Init();
-  MX_USART3_UART_Init();
+  MX_USART3_UART_Init();                                               
   MX_CAN1_Init();
   MX_CAN2_Init();
   MX_USART6_UART_Init();
@@ -112,6 +113,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
   delay_init(); // 一定要有，INS_task会用到delay_us
   HAL_TIM_PWM_Start(&htim10, TIM_CHANNEL_1); // 用于对陀螺仪进行恒温处理
+  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3); // 蜂鸣器pwm
+  buzzer_play_eva();
+  HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_3); // 用完蜂鸣器就关掉省资源
   /***************CAN初始化*****************/
   Create_Can_Send_Queues(); // 创建can发送队列
   Create_Can_Send_Timers(); //创建can发送定时器任务
@@ -119,7 +123,7 @@ int main(void)
   Can_Msg_Init(); //初始化can消息
   /*****************************************/
   //remote_control_init(); //配置并使能usart3的DMA接收和空闲中断，在没有云台需要直接把遥控器接收机插在底盘C板上时使用
-  //DWT_Init(CPU_FREQ_MHZ); //需要精确延时或看一段代码的运行时长时开启
+  // DWT_Init(CPU_FREQ_MHZ); //需要精确延时或看一段代码的运行时长时开启
 
   /* USER CODE END 2 */
 

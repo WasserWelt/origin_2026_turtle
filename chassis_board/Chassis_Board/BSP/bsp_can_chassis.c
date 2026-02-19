@@ -1,5 +1,5 @@
 /********************************************************************************************************************************************
- * @file: bsp_can.c
+ * @file: bsp_can_chassis.c
  * @author: Shiki
  * @date: 2025.10.21
  * @brief:	哨兵2026赛季CAN总线支持包，此为底盘C板相关的CAN接收和发送代码
@@ -7,7 +7,7 @@
  * @attention: 1.哨兵can报文发送的流程是在各个task计算出需要向电机或其他设备（超电，另一块C板）需要发送的数据后，在xxx_task.c中调用
  *             Allocate_Can_Queue（）或者Ctrl_DM_Motor()。调用规则为如果是向达秒电机发送can报文，则调用Ctrl_DM_Motor()，其他直接
  *             调用Allocate_Can_Queue()。这两个函数的最终目的是将各个task要发送的can报文填充入对应的can发送队列（队列使用freertos实现)，
- * 			   最后can报文会在freertos的定时器任务中统一发送。
+ * 			   		 最后can报文会在freertos的定时器任务中统一发送。
  *
  *             2.本文件为各个task提供接口函数和全局变量（注：定时器任务的创建和实现在Can_Send_Task.c/h)。
  **********************************************************************************************************************************************/
@@ -17,6 +17,7 @@
 #include "main.h"
 #include "motor.h"
 #include "detect_task.h"
+#include "Chassis_Task.h"
 #include "user_common_lib.h"
 #include "string.h"
 /************************达秒电机控制参数******************************/
@@ -30,35 +31,22 @@
 #define T_MAX 15.0f
 #define P_MIN -12.56637f
 #define P_MAX 12.56637f
-/*********************************CAN接收ID*******************************************/
-#define BIG_YAW_DM6006_RecID 0x300       // CAN2,下板需要接收大yaw的电机位置数据用于底盘跟随云台
-#define RC_TO_CHASSIS_FIRST_RecID 0x102  // CAN2
-#define RC_TO_CHASSIS_SECOND_RecID 0x100 // CAN2
-#define STEER1_GM6020_RecID 0x205        // CAN2
-#define STEER2_GM6020_RecID 0x206        // CAN2
-#define STEER3_GM6020_RecID 0x207        // CAN2
-#define STEER4_GM6020_RecID 0x208        // CAN2
-
-#define WHEEL1_M3508_RecID 0x201 // CAN1
-#define WHEEL2_M3508_RecID 0x202 // CAN1
-#define WHEEL3_M3508_RecID 0x203 // CAN1
-#define WHEEL4_M3508_RecID 0x204 // CAN1
-#define CAP_RecID 0x130          // CAN1 超电
-/*********************************CAN发送ID*******************************************/
-#define STEER_GM6020_TransID 0x1FF // CAN2,4个6020一起发
-#define WHEEL_M3508_TransID 0x200  // CAN1,4个3508一起发
-#define CAP_TransID 0x140          // CAN1 超电
+/*********************************导航数据解析参数*******************************************/
+#define NAV_MAX_SPEED 10.0f // 导航最大速度
+#define NAV_MIN_SPEED -10.0f // 导航最小速度
 /***********************************************全局变量********************************/
 CAN_RxHeaderTypeDef rx_header; // debug用，看can接收正不正常
 chassis_rc_ctrl_t chassis_rc_ctrl = {0};
-// int32_t trans_freq = 0; // can发送定时器的中断回调函数每秒执行次数，配合dwt使用
-// int i1,i2,i3;
+uint32_t real_power; // 功率计测出的功率
+// int32_t trans = 0; 
+// uint16_t can_err_cnt[9];
+// uint16_t can_rec_cnt[9];
 /*********************************************CAN发送队列*********************************************************************/
 QueueHandle_t CAN1_send_queue; // CAN1消息队列句柄,此队列用于储存CAN1的发送消息
 QueueHandle_t CAN2_send_queue; // CAN2消息队列句柄，此队列用于储存CAN2的发送消息
 
 #define CAN_SEND_QUEUE_LENGTH 128
-#define STEER_GM6020_SEND_QUEUE CAN2_send_queue
+#define STEER_GM6020_SEND_QUEUE CAN1_send_queue
 #define WHEEL_M3508_SEND_QUEUE CAN1_send_queue
 #define CAP_SEND_QUEUE CAN1_send_queue
 /*********************************************CAN发送消息实例*********************************************************************/
@@ -72,24 +60,32 @@ CanTxMsgTypeDef cap_send_msg;   // 大yaw轴达妙6006 can报文全局缓冲区
  */
 void Can_Filter_Init(void)
 {
-    CAN_FilterTypeDef can_filter_st;
-    can_filter_st.FilterActivation = ENABLE;
-    can_filter_st.FilterMode = CAN_FILTERMODE_IDMASK;
-    can_filter_st.FilterScale = CAN_FILTERSCALE_32BIT;
-    can_filter_st.FilterIdHigh = 0x0000;
-    can_filter_st.FilterIdLow = 0x0000;
-    can_filter_st.FilterMaskIdHigh = 0x0000;
-    can_filter_st.FilterMaskIdLow = 0x0000;
-    can_filter_st.FilterBank = 0;
-    can_filter_st.FilterFIFOAssignment = CAN_RX_FIFO0;
-    HAL_CAN_ConfigFilter(&hcan1, &can_filter_st);
+    CAN_FilterTypeDef can_filter;
+
+    can_filter.FilterActivation = ENABLE;
+    can_filter.FilterMode = CAN_FILTERMODE_IDMASK;
+    can_filter.FilterScale = CAN_FILTERSCALE_32BIT;
+    can_filter.FilterIdHigh = 0x0000;
+    can_filter.FilterIdLow = 0x0000;
+    can_filter.FilterMaskIdHigh = 0x0000;
+    can_filter.FilterMaskIdLow = 0x0000;
+    can_filter.FilterBank = 0;
+    can_filter.FilterFIFOAssignment = CAN_RX_FIFO0;
+    can_filter.SlaveStartFilterBank = 14;    //can2是从can,这行代码设置了从第几组过滤器开始是属于can2的
+    HAL_CAN_ConfigFilter(&hcan1, &can_filter);
     HAL_CAN_Start(&hcan1);
     HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
-    // HAL_CAN_ActivateNotification(&hcan1, CAN_IT_TX_MAILBOX_EMPTY);
 
-    can_filter_st.SlaveStartFilterBank = 14;
-    can_filter_st.FilterBank = 14;
-    HAL_CAN_ConfigFilter(&hcan2, &can_filter_st);
+    can_filter.FilterActivation = ENABLE;  //can2配置为只接收大yaw,遥控器和导航的can报文
+    can_filter.FilterMode = CAN_FILTERMODE_IDLIST;
+    can_filter.FilterScale = CAN_FILTERSCALE_16BIT;
+    can_filter.FilterIdHigh = (GIMBAL_TO_CHASSIS_FIRST_RecID << 5);
+    can_filter.FilterIdLow = (GIMBAL_TO_CHASSIS_SECOND_RecID << 5);
+    can_filter.FilterMaskIdHigh = (BIG_YAW_DM6006_RecID << 5);
+    can_filter.FilterMaskIdLow = 0x0000;
+    can_filter.FilterBank = 14;
+    can_filter.FilterFIFOAssignment = CAN_RX_FIFO0;
+    HAL_CAN_ConfigFilter(&hcan2, &can_filter);
     HAL_CAN_Start(&hcan2);
     HAL_CAN_ActivateNotification(&hcan2, CAN_IT_RX_FIFO0_MSG_PENDING);
 }
@@ -139,30 +135,51 @@ void Create_Can_Send_Queues()
         Error_Handler();
 }
 /*********************************************CAN接收函数*********************************************************************/
+float EnergyDataToFloat(const uint8_t dat[8])
+{
+    uint32_t u32 = ((uint32_t)dat[0] << 24) |
+                   ((uint32_t)dat[1] << 16) |
+                   ((uint32_t)dat[2] << 8) |
+                   ((uint32_t)dat[3]);
+
+    float result;
+    memcpy(&result, &u32, sizeof(result));
+    return result;
+}
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-    //	static int flag = 0;
-    //	static float start_time = 0;
+    	// static int flag = 0;
+    	// static float start_time = 0;
 
-    //	if (flag == 0)
-    //	{
-    //		start_time = DWT_GetTimeline_ms();
-    //		flag = 1;
-    //	}
-    //	if (flag == 1)
-    //	{
-    //		if (DWT_GetTimeline_ms() - start_time <= 1000)
-    //		{
-    //			trans_freq++;
-    //		}
-    //		else
-    //		{
-    //			flag = 0;
-    //			i1=i2=i3=0;
-    //			trans_freq = 0;
-    //		}
-    //	}
+    	// if (flag == 0)
+    	// {
+    	// 	start_time = DWT_GetTimeline_ms();
+    	// 	flag = 1;
+        // trans = 1;
+        // }
+    	// if (flag == 1)
+    	// {
+    	// 	if (DWT_GetTimeline_ms() - start_time > 1000)
+    	// 	{
+    	// 		flag = 0;
+    	// 		trans = 0;
+		// 			for(int j = 0; j < 8; j ++)
+        //         {
+        //             if(can_rec_cnt[j] < 500)
+        //             can_err_cnt[j]++;
+        //         }
+        //         if(can_rec_cnt[8] < 51)
+        //         {
+        //             can_err_cnt[8]++;
+        //         }
+                
+        //         for (int j = 0; j < 9; j++)
+        //             can_rec_cnt[j] = 0;
+    	// 	}
+    	// }
+
     uint8_t rx_data[8];
+
     if (hcan == &hcan1)
     {
         HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data);
@@ -177,12 +194,46 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             uint8_t i = rx_header.StdId - WHEEL1_M3508_RecID;
             get_motor_measure(&motor_measure_wheel[i], rx_data);
             // detect_hook(CHASSIS_MOTOR1_TOE + i);
+
+            // if(trans == 1)
+            // {
+            //     can_rec_cnt[i] ++;
+            // }
+
+            break;
+        }
+
+        case STEER1_GM6020_RecID:
+        case STEER2_GM6020_RecID:
+        case STEER3_GM6020_RecID:
+        case STEER4_GM6020_RecID:
+        {
+            uint8_t i = rx_header.StdId - STEER1_GM6020_RecID;
+            get_motor_measure(&motor_measure_steer[i], rx_data);
+
+            // if (trans == 1)
+            // {
+            //     can_rec_cnt[rx_header.StdId - WHEEL1_M3508_RecID]++;
+            // }
+
             break;
         }
 
         case CAP_RecID:
         {
             update_cap(rx_data);
+            detect_hook(CAP_TOE);
+            break;
+        }
+
+        case POWER_METER_RecID:
+        {
+            real_power = EnergyDataToFloat(rx_data);
+            // if (trans == 1)
+            // {
+            //     can_rec_cnt[8]++;
+            // }
+
             break;
         }
         default:
@@ -196,16 +247,6 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data);
         switch (rx_header.StdId)
         {
-        case STEER1_GM6020_RecID:
-        case STEER2_GM6020_RecID:
-        case STEER3_GM6020_RecID:
-        case STEER4_GM6020_RecID:
-        {
-            uint8_t i = rx_header.StdId - STEER1_GM6020_RecID;
-            get_motor_measure(&motor_measure_steer[i], rx_data);
-
-            break;
-        }
         case BIG_YAW_DM6006_RecID: // 下板只需要DM6006的位置数据完成底盘跟随云台
         {
             //			i1++;
@@ -214,7 +255,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             DM_big_yaw_motor.p_int = (rx_data[1] << 8) | rx_data[2];
             break;
         }
-        case RC_TO_CHASSIS_FIRST_RecID:
+        case GIMBAL_TO_CHASSIS_FIRST_RecID:
         {
             uint8_t rc_connected;
             //			i2++;
@@ -225,13 +266,25 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             chassis_rc_ctrl.ch[4] = (rx_data[6] << 8) | rx_data[7];
 
             if (rc_connected)
-                detect_hook(RC_FIRST_TOE);
+                detect_hook(RC_TOE);
 
             break;
         }
-        case RC_TO_CHASSIS_SECOND_RecID:
+        case GIMBAL_TO_CHASSIS_SECOND_RecID:
         {
-            //			i3++;//此can报文还未确定会发什么数据过来
+            //			i3++;
+            int nav_vx_int = (rx_data[1] << 8) | rx_data[0];
+            int nav_vy_int = (rx_data[3] << 8) | rx_data[2];
+            
+            nav_ctrl.vx = uint_to_float(nav_vx_int,NAV_MIN_SPEED,NAV_MAX_SPEED,12);
+            nav_ctrl.vy = uint_to_float(nav_vy_int, NAV_MIN_SPEED, NAV_MAX_SPEED, 12);
+            nav_ctrl.chassis_target_mode = rx_data[4] & 0x03; // chassis_target_mode对应rx_data[4]最低两位,下面的flag以此类推
+            nav_ctrl.updownhill_state = (rx_data[4] >> 2) & 0x03;
+            nav_ctrl.health_state = (rx_data[4] >> 4) & 0x01;
+            nav_ctrl.buffer_energy_remain = ((rx_data[5] & 0x07) << 3) | (rx_data[4] >> 5);
+            nav_ctrl.referee_power_limit = ((rx_data[6] & 0x07) << 5) | (rx_data[5] >> 3);
+
+            detect_hook(NAV_TOE);
             break;
         }
         default:
@@ -241,8 +294,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         }
     }
 }
-
-/*********************************************************填充CAN消息数据域************************************************************************/
+/*********************************************************CAN发送，填充CAN消息数据域************************************************************************/
 /**
  * @description: 将待发送的can报文送入对应的发送队列，在Can_Send_Task统一发送
  * @return 无
@@ -290,4 +342,25 @@ void Allocate_Can_Msg(int16_t data1, int16_t data2, int16_t data3, int16_t data4
     default:
         return; // 无效命令，直接返回
     }
+}
+
+void CAN_cmd_power_meter(int16_t yaw, int16_t pitch, int16_t shoot, int16_t rev)
+{
+    uint32_t send_mail_box;
+    CAN_TxHeaderTypeDef gimbal_tx_message;
+    uint8_t gimbal_can_send_data[8];
+
+    gimbal_tx_message.StdId = POWER_METER_TransID;
+    gimbal_tx_message.IDE = CAN_ID_STD;
+    gimbal_tx_message.RTR = CAN_RTR_DATA;
+    gimbal_tx_message.DLC = 0x08;
+    gimbal_can_send_data[0] = (yaw >> 8);
+    gimbal_can_send_data[1] = yaw;
+    gimbal_can_send_data[2] = (pitch >> 8);
+    gimbal_can_send_data[3] = pitch;
+    gimbal_can_send_data[4] = (shoot >> 8);
+    gimbal_can_send_data[5] = shoot;
+    gimbal_can_send_data[6] = (rev >> 8);
+    gimbal_can_send_data[7] = rev;
+    HAL_CAN_AddTxMessage(&hcan1, &gimbal_tx_message, gimbal_can_send_data, &send_mail_box);
 }

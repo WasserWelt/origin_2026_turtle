@@ -23,7 +23,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "Cboard_To_Nuc_usbd_communication.h"
-#include "bsp_can.h"
 #include "remote_control.h"
 #include "INS_Task.h"
 #include "referee_usart_task.h"

@@ -1,64 +1,56 @@
+/****************************************************************
+ * @file: 	Gimbal_Task.c
+ * @author: Shiki
+ * @date:	2025.10.5
+ * @brief:	2026赛季哨兵发射机构任务
+ * @attention:
+ ******************************************************************/
 #include "Shoot_Task.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "bsp_can_gimbal.h"
 #include "remote_control.h"
-#include "bsp_can.h"
-#include "bsp_tim.h"
-#include "usart.h"
-#include <stdio.h>
-#include <stdlib.h>
 #include "referee.h"
 #include "math.h"
 #include "Cboard_To_Nuc_usbd_communication.h"
 #include "Vofa_send.h"
 #include "user_common_lib.h"
+#include "motor.h"
 #include "detect_task.h"
 
-#define DIAL_MOTOR_SPEED_PID_KP 9.0f
-#define DIAL_MOTOR_SPEED_PID_KI 0.0f
-#define DIAL_MOTOR_SPEED_PID_KD 10.0f
-#define DIAL_MOTOR_SPEED_PID_MAX_OUT 28000.0f
-#define DIAL_MOTOR_SPEED_PID_MAX_IOUT 10000.0f
+typedef struct
+{
+	bool_t need_limit_heat;		// 是否需要进行热量保护
+	bool_t fric_ready;			// 摩擦轮是否达到目标转速
+	bool_t fric_start;			// 是否让摩擦轮开始转动
+	bool_t dial_over_temperatue; //拨盘电机是否过温
+	int16_t fric_target_rpm;	// 摩擦轮目标转速
+	uint16_t cooling_limit_cnt; // 热量保护计数
+} shoot_control_t;
 
-#define DIAL_MOTOR_ANGLE_PID_KP 0.3f
-#define DIAL_MOTOR_ANGLE_PID_KI 0.0f
-#define DIAL_MOTOR_ANGLE_PID_KD 0.2f
-#define DIAL_MOTOR_ANGLE_PID_MAX_OUT 10000.0f
-#define DIAL_MOTOR_ANGLE_PID_MAX_IOUT 10000.0f
-
-#define SHOOT_MOTOR_3508_SPEED_PID_KP1 4.0f
-#define SHOOT_MOTOR_3508_SPEED_PID_KI1 0.00007f
-#define SHOOT_MOTOR_3508_SPEED_PID_KD1 0.0f
-
-#define SHOOT_MOTOR_3508_SPEED_PID_KP2 4.0f
-#define SHOOT_MOTOR_3508_SPEED_PID_KI2 0.00007f
-#define SHOOT_MOTOR_3508_SPEED_PID_KD2 0.0f
-#define SHOOT_MOTOR_3508_SPEED_PID_MAX_OUT 16000.0f
-#define SHOOT_MOTOR_3508_SPEED_PID_MAX_IOUT 4000.0f
-
-#define DIAL_SPEED_LOW 4500 // 3000
-#define DIAL_SPEED_HIGH 5500
-
-shoot_motor_t shoot_m2006[2] = {0};
-shoot_motor_t shoot_motor_3508[2] = {0};
-bool_t heat_limit_control_flag = 0;
-uint16_t cooling_limit_cnt[2] = {0};
-uint8_t fric_state = 0; // 0:off,1:on
-motor_measure_t shoot_motor_measure[2];
-// uint16_t fric_speed = 1005;  #pwm控制摩擦轮的寄存器目标值
-uint16_t shoot_flag = 0;
-int target_rpm_define = 6100;
-
+shoot_control_t shoot_control = {
+	.need_limit_heat = FALSE,
+	.fric_ready = FALSE,
+	.fric_start = FALSE,
+	.dial_over_temperatue = FALSE,
+	.fric_target_rpm = 6100,
+	.cooling_limit_cnt = 0};
 /*****************************************************************根据裁判系统发射数据进行弹速闭环********************************************************************************/
+#define HAVE_REFEREE_SYSTEM 0 // 哨兵当前是否安装裁判系统
 
-#define USE_REFEREE_BULLET_SPEED_LOOP 0 // 1:对裁判系统传回的弹速闭环，外环控弹速（因为裁判系统传回的弹速数据是发射一发子弹传一次，频率不固定，所以只能用状态机控制，不用pid)，内环控摩擦轮3508转速
+#if HAVE_REFEREE_SYSTEM
+#define USE_REFEREE_BULLET_SPEED_LOOP 1 // 1:对裁判系统传回的弹速闭环，外环控弹速（因为裁判系统传回的弹速数据是发射一发子弹传一次，频率不固定，所以只能用状态机控制，不用pid)，内环控摩擦轮3508转速
 										// 0:仅对3508摩擦轮速度闭环，适用没有裁判系统的情况
+#else
+#define USE_REFEREE_BULLET_SPEED_LOOP 0
+#endif
+
 #if USE_REFEREE_BULLET_SPEED_LOOP
 // 弹速控制参数
 #define TARGET_BULLET_SPEED 23.0f // 目标弹速
 #define MIN_ADJUST_STEP 10		  // 弹速很接近目标弹速时每次调整的转速步长
-#define MIDDLE_ADJUST_STEP 15	  // 弹速较为接近目标弹速时每次调整的转速步长
-#define MAX_ADJUST_STEP 30		  // 弹速距离目标弹速偏差较大时每次调整的转速步长
+#define MIDDLE_ADJUST_STEP 20	  // 弹速较为接近目标弹速时每次调整的转速步长
+#define MAX_ADJUST_STEP 40		  // 弹速距离目标弹速偏差较大时每次调整的转速步长
 #define MIN_RPM 5000			  // 摩擦轮最小转速
 #define MAX_RPM 7000			  // 摩擦轮最大转速
 
@@ -124,9 +116,9 @@ void Fric_Motor_Speed_Control(void)
 			// 调速逻辑
 			float diff = TARGET_BULLET_SPEED - avg_speed;
 			uint8_t step = Choose_Bullet_Speed_Adjust_Step(my_fabsf(diff));
-			target_rpm_define += my_sign(diff) * step;
+			shoot_control.fric_target_rpm += my_sign(diff) * step;
 			// 对目标转速进行约束
-			target_rpm_define = limit(target_rpm_define, (float)MIN_RPM, (float)MAX_RPM);
+			shoot_control.fric_target_rpm = limit(shoot_control.fric_target_rpm, (float)MIN_RPM, (float)MAX_RPM);
 			// 重置计数
 			bullet_speed_sum = 0.0f;
 			bullet_count = 0;
@@ -140,14 +132,13 @@ void Shoot_Motor_Pid_Init(void)
 	const static fp32 dial_motor_speed_pid[3] = {DIAL_MOTOR_SPEED_PID_KP, DIAL_MOTOR_SPEED_PID_KI, DIAL_MOTOR_SPEED_PID_KD};
 	const static fp32 dial_motor_angle_pid[3] = {DIAL_MOTOR_ANGLE_PID_KP, DIAL_MOTOR_ANGLE_PID_KI, DIAL_MOTOR_ANGLE_PID_KD};
 
-	PID_init(&shoot_m2006[0].speed_pid, PID_POSITION, dial_motor_speed_pid, DIAL_MOTOR_SPEED_PID_MAX_OUT, DIAL_MOTOR_SPEED_PID_MAX_IOUT);
-	PID_init(&shoot_m2006[0].angle_pid, PID_POSITION, dial_motor_angle_pid, DIAL_MOTOR_ANGLE_PID_MAX_OUT, DIAL_MOTOR_ANGLE_PID_MAX_IOUT);
+	PID_init(&LK_dial_motor.speed_pid, PID_POSITION, dial_motor_speed_pid, DIAL_MOTOR_SPEED_PID_MAX_OUT, DIAL_MOTOR_SPEED_PID_MAX_IOUT);
+	PID_init(&LK_dial_motor.angle_pid, PID_POSITION, dial_motor_angle_pid, DIAL_MOTOR_ANGLE_PID_MAX_OUT, DIAL_MOTOR_ANGLE_PID_MAX_IOUT);
 
-	const static fp32 shoot_motor_3508_speed_pid1[3] = {SHOOT_MOTOR_3508_SPEED_PID_KP1, SHOOT_MOTOR_3508_SPEED_PID_KI1, SHOOT_MOTOR_3508_SPEED_PID_KD1};
-	const static fp32 shoot_motor_3508_speed_pid2[3] = {SHOOT_MOTOR_3508_SPEED_PID_KP2, SHOOT_MOTOR_3508_SPEED_PID_KI2, SHOOT_MOTOR_3508_SPEED_PID_KD2};
+	const static fp32 fric_motor_speed_pid[3] = {FRIC_MOTOR_SPEED_PID_KP, FRIC_MOTOR_SPEED_PID_KI, FRIC_MOTOR_SPEED_PID_KD};
 
-	PID_init(&shoot_motor_3508[0].speed_pid, PID_POSITION, shoot_motor_3508_speed_pid1, SHOOT_MOTOR_3508_SPEED_PID_MAX_OUT, SHOOT_MOTOR_3508_SPEED_PID_MAX_IOUT);
-	PID_init(&shoot_motor_3508[1].speed_pid, PID_POSITION, shoot_motor_3508_speed_pid2, SHOOT_MOTOR_3508_SPEED_PID_MAX_OUT, SHOOT_MOTOR_3508_SPEED_PID_MAX_IOUT);
+	PID_init(&fric_motor[0].speed_pid, PID_POSITION, fric_motor_speed_pid, FRIC_MOTOR_SPEED_PID_MAX_OUT, FRIC_MOTOR_SPEED_PID_MAX_IOUT);
+	PID_init(&fric_motor[1].speed_pid, PID_POSITION, fric_motor_speed_pid, FRIC_MOTOR_SPEED_PID_MAX_OUT, FRIC_MOTOR_SPEED_PID_MAX_IOUT);
 }
 
 /**
@@ -156,64 +147,73 @@ void Shoot_Motor_Pid_Init(void)
  */
 void Shoot_Motor_Data_Update(void)
 {
-	shoot_m2006[0].speed = motor_measure_shoot[2].speed_rpm;
-	shoot_m2006[0].current = motor_measure_shoot[2].given_current;
+	LK_dial_motor.speed_now = motor_measure_dial.speed / 6.0f;
+	LK_dial_motor.angle_now = motor_measure_dial.ecd / 65535.0f * 360.0f;
+	LK_dial_motor.given_current = motor_measure_dial.given_current;
+	LK_dial_motor.temperature = motor_measure_dial.temperature;
+
 	for (int i = 0; i < 2; i++)
 	{
-		shoot_motor_3508[i].speed = motor_measure_shoot[i].speed_rpm;
-		shoot_motor_3508[i].current = motor_measure_shoot[i].given_current;
+		fric_motor[i].speed_now = motor_measure_fric[i].speed_rpm;
+		fric_motor[i].given_current = motor_measure_fric[i].given_current;
 	}
 }
 
 /**
- * @description:更新fric_state,fric_state为1时摩擦轮转动
+ * @description:更新shoot_control.fric_start,shoot_control.fric_start为1时摩擦轮开始转动
  * @return 无
  */
-void Fric_State_Update()
+void Fric_Start_Update()
 {
-	if (((rc_ctrl.rc.s[1] == RC_SW_UP) || ((rc_ctrl.rc.s[1] == RC_SW_MID) && (rc_ctrl.rc.s[0] != RC_SW_DOWN))) && Game_Robot_State.power_management_shooter_output == 0x01)
+	bool_t start_fric;
+
+#if HAVE_REFEREE_SYSTEM
+	start_fric = ((rc_ctrl.rc.s[1] == RC_SW_UP) || ((rc_ctrl.rc.s[1] == RC_SW_MID) && (rc_ctrl.rc.s[0] != RC_SW_DOWN))) && Game_Robot_State.power_management_shooter_output == 0x01;
+#else
+	start_fric = ((rc_ctrl.rc.s[1] == RC_SW_UP) || ((rc_ctrl.rc.s[1] == RC_SW_MID) && (rc_ctrl.rc.s[0] != RC_SW_DOWN)));
+#endif
+
+	if (start_fric)
 	{
-		fric_state = 1;
+		shoot_control.fric_start = TRUE;
 	}
 	else
 	{
-		fric_state = 0;
+		shoot_control.fric_start = FALSE;
 	}
 }
 /**
- * @description:更新shoot_flag,shoot_flag为1时才能转波蛋盘，目的是确保在摩擦轮转速达到后才发弹
+ * @description:更新shoot_control.fric_ready,shoot_control.fric_ready为1时才能转波蛋盘，目的是确保在摩擦轮转速达到后才发弹
  * @return 无
  */
-void Shoot_Flag_Update(void)
+void Fric_Ready_Update(void)
 {
-	if (((rc_ctrl.rc.s[0] == RC_SW_DOWN) && !(rc_ctrl.rc.s[1] == RC_SW_UP)) || rc_ctrl.rc.s[1] == RC_SW_DOWN || Game_Robot_State.power_management_shooter_output == 0x00)
+	if ((fric_motor[0].speed_now < -(shoot_control.fric_target_rpm - 300)) && (fric_motor[1].speed_now > shoot_control.fric_target_rpm - 300))
 	{
-		shoot_flag = 0;
+		shoot_control.fric_ready = TRUE;
 	}
-	else if ((shoot_motor_3508[0].speed > target_rpm_define - 300) && (shoot_motor_3508[1].speed < -target_rpm_define + 300))
-	{
-		shoot_flag = 1;
-	}
+	else
+		shoot_control.fric_ready = FALSE;
 }
 
 void Fric_Motor_Current_Control(void)
 {
-	if (fric_state) // fric_state
+	if (shoot_control.fric_start && !toe_is_error(DBUS_TOE))
 	{
-		shoot_motor_3508[0].speed_set = target_rpm_define;
-		shoot_motor_3508[1].speed_set = -target_rpm_define;
+		fric_motor[0].speed_set = -shoot_control.fric_target_rpm;
+		fric_motor[1].speed_set = shoot_control.fric_target_rpm;
 	}
 	else
 	{
-		shoot_motor_3508[0].speed_set = 0;
-		shoot_motor_3508[1].speed_set = 0;
+		fric_motor[0].speed_set = 0;
+		fric_motor[1].speed_set = 0;
 	}
 
-	PID_calc(&shoot_motor_3508[0].speed_pid, shoot_motor_3508[0].speed, shoot_motor_3508[0].speed_set);
-	PID_calc(&shoot_motor_3508[1].speed_pid, shoot_motor_3508[1].speed, shoot_motor_3508[1].speed_set);
+	PID_calc(&fric_motor[0].speed_pid, fric_motor[0].speed_now, fric_motor[0].speed_set);
+	PID_calc(&fric_motor[1].speed_pid, fric_motor[1].speed_now, fric_motor[1].speed_set);
 
-	shoot_motor_3508[0].target_current = shoot_motor_3508[0].speed_pid.out; // - dif_pid.out;
-	shoot_motor_3508[1].target_current = shoot_motor_3508[1].speed_pid.out; // + dif_pid.out;
+	fric_motor[0].give_current = fric_motor[0].speed_pid.out; // - dif_pid.out;
+	fric_motor[1].give_current = fric_motor[1].speed_pid.out; // + dif_pid.out;
 }
 
 /**
@@ -222,32 +222,37 @@ void Fric_Motor_Current_Control(void)
  */
 void Dial_Speed_Set(fp32 *dial_speed)
 {
-	if ((rc_ctrl.rc.s[1] == RC_SW_UP || AutoAim_Data_Receive.track || (rc_ctrl.rc.s[1] == RC_SW_MID && rc_ctrl.rc.s[0] == RC_SW_UP)) && Game_Robot_State.power_management_shooter_output == 0x01) // 判断是否要进行热量保护,快超热量了就把拨弹盘目标速度定为0一段时间
-	// if ((rc_ctrl.rc.s[1] == RC_SW_UP || AutoAim_Data_Receive.track) && Game_Robot_State.power_management_shooter_output == 0x01) // 判断是否要进行热量保护,快超热量了就把拨弹盘目标速度定为0一段时间
+#if HAVE_REFEREE_SYSTEM
+	if ((rc_ctrl.rc.s[1] == RC_SW_UP || (NUC_Data_Receive.yaw_aim != 0) || (rc_ctrl.rc.s[1] == RC_SW_MID && rc_ctrl.rc.s[0] == RC_SW_UP)) && Game_Robot_State.power_management_shooter_output == 0x01) // 判断是否要进行热量保护,快超热量了就把拨弹盘目标速度定为0一段时间
 	{
-		if ((Power_Heat_Data.shooter_17mm_1_barrel_heat >= (Game_Robot_State.shooter_barrel_heat_limit - 60)) || (Power_Heat_Data.shooter_17mm_2_barrel_heat >= (Game_Robot_State.shooter_barrel_heat_limit - 60)))
+		if ((Power_Heat_Data.shooter_17mm_1_barrel_heat >= (Game_Robot_State.shooter_barrel_heat_limit - 60)))
 		{
-			heat_limit_control_flag = 1;
+			shoot_control.need_limit_heat = 1;
 		}
-		if (heat_limit_control_flag)
+		if (shoot_control.need_limit_heat)
 		{
-			cooling_limit_cnt[0]++;
-			if (cooling_limit_cnt[0] >= 250)
+			shoot_control.cooling_limit_cnt++;
+			if (shoot_control.cooling_limit_cnt >= 250)
 			{
-				cooling_limit_cnt[0] = 0;
-				heat_limit_control_flag = 0;
+				shoot_control.cooling_limit_cnt = 0;
+				shoot_control.need_limit_heat = 0;
 			}
 
 			*dial_speed = 0;
 			return;
 		}
 	}
+#endif
 
 	bool_t remote_control_shoot = (rc_ctrl.rc.s[0] == RC_SW_UP && rc_ctrl.rc.s[1] == RC_SW_MID);
-	bool_t autoaim_shoot = (rc_ctrl.rc.s[1] == RC_SW_UP && AutoAim_Data_Receive.fire_or_not == 1 && Game_Status.game_progress == 4);
 
-	if (shoot_flag && (remote_control_shoot || autoaim_shoot))
-	// if (shoot_flag && (remote_control_shoot))
+#if HAVE_REFEREE_SYSTEM
+	bool_t autoaim_shoot = (rc_ctrl.rc.s[1] == RC_SW_UP && NUC_Data_Receive.fire_or_not == 1 && Game_Status.game_progress == 4);
+#else
+	bool_t autoaim_shoot = (rc_ctrl.rc.s[1] == RC_SW_UP && NUC_Data_Receive.fire_or_not == 1);
+#endif
+
+	if (shoot_control.fric_ready && (remote_control_shoot || autoaim_shoot))
 	{
 		*dial_speed = (float)DIAL_SPEED_HIGH;
 	}
@@ -257,38 +262,61 @@ void Dial_Speed_Set(fp32 *dial_speed)
 
 void Dial_Motor_Control(void)
 {
-	if (rc_ctrl.rc.s[1] == RC_SW_DOWN || toe_is_error(DBUS_TOE)) // 失能状态直接给波蛋盘电机目标电流置零
+	if (LK_dial_motor.temperature > 80)
+		shoot_control.dial_over_temperatue = TRUE;
+
+	if (shoot_control.dial_over_temperatue = TRUE && LK_dial_motor.temperature < 60)
+		shoot_control.dial_over_temperatue = FALSE;
+
+#if HAVE_REFEREE_SYSTEM
+	bool_t disable_dial_motor = (rc_ctrl.rc.s[1] == RC_SW_DOWN || toe_is_error(DBUS_TOE) || shoot_control.dial_over_temperatue || power_management_shooter_output == 0x00);
+#else
+	bool_t disable_dial_motor = (rc_ctrl.rc.s[1] == RC_SW_DOWN || toe_is_error(DBUS_TOE) || shoot_control.dial_over_temperatue);
+#endif
+
+	if (disable_dial_motor) // 失能状态直接给波蛋盘电机目标电流置零
 	{
-		shoot_m2006[0].target_current = 0;
+		LK_dial_motor.give_current = 0;
+		PID_clear(&LK_dial_motor.speed_pid);
+		PID_clear(&LK_dial_motor.angle_pid);
 		return;
 	}
-	static uint32_t dial_stop_cnt = 0;
 
-	if (Game_Robot_State.power_management_shooter_output == 0x01) // 卡弹保护，卡弹时波蛋盘反转
+	static uint8_t dial_back_flag = 0; // 退弹保护flag
+	static uint32_t dial_stop_cnt = 0;
+	static uint16_t back_start_time = 0;
+
+	if (dial_back_flag) // 如果需要退弹保护，波蛋盘反转一段时间
 	{
-		if (abs(shoot_m2006[0].target_current) > 18000 && fabs(shoot_m2006[0].speed) < 100)
+		if (xTaskGetTickCount() - back_start_time > 250) // 如果超出时间阈值，就退出退弹保护
 		{
-			dial_stop_cnt++;
-			if (dial_stop_cnt > 200)
-			{
-				if (shoot_m2006[0].target_current < 0)
-					shoot_m2006[0].target_current = 5000;
-				else
-					shoot_m2006[0].target_current = -5000;
-				vTaskDelay(100);
-				Shoot_Motor_Pid_Init();
-				PID_clear(&shoot_m2006[0].speed_pid);
-				PID_clear(&shoot_m2006[0].angle_pid);
-				dial_stop_cnt = 0;
-			}
+			dial_back_flag = 0;
+			dial_stop_cnt = 0;
+			PID_clear(&LK_dial_motor.speed_pid);
+			PID_clear(&LK_dial_motor.angle_pid);
+		}
+		else
+			return; // 时间阈值没到，target_current继续保持5000或-5000
+	}
+	if (abs(LK_dial_motor.give_current) > 1200 && fabs(LK_dial_motor.speed_now) < 10 && !toe_is_error(DIAL_MOTOR_TOE) && shoot_control.fric_ready) // 波蛋盘电机给定电流较大但是转速很小，说明拨弹盘卡住了
+	{
+		dial_stop_cnt++;
+		if (dial_stop_cnt > 200)
+		{
+			dial_back_flag = 1;
+			back_start_time = xTaskGetTickCount();
+			if (LK_dial_motor.give_current < 0)
+				LK_dial_motor.give_current = 1500;
+			else
+				LK_dial_motor.give_current = -1500;
+
+			return;
 		}
 	}
-	Dial_Speed_Set(&shoot_m2006[0].speed_set);
-	PID_calc(&shoot_m2006[0].speed_pid, shoot_m2006[0].speed, shoot_m2006[0].speed_set);
-	//	PID_calc(&shoot_m2006[1].speed_pid,shoot_m2006[1].speed,shoot_m2006[1].speed_set);
+	Dial_Speed_Set(&LK_dial_motor.speed_set);
+	PID_calc(&LK_dial_motor.speed_pid, LK_dial_motor.speed_now, LK_dial_motor.speed_set);
 
-	shoot_m2006[0].target_current = shoot_m2006[0].speed_pid.out;
-	//	shoot_m2006[1].give_current=shoot_m2006[1].speed_pid.out;
+	LK_dial_motor.give_current = LK_dial_motor.speed_pid.out;
 }
 
 void Shoot_Task(void const *argument)
@@ -298,9 +326,11 @@ void Shoot_Task(void const *argument)
 
 	while (1)
 	{
+		static uint8_t cnt = 1;
+
 		Shoot_Motor_Data_Update();
-		Fric_State_Update();
-		Shoot_Flag_Update();
+		Fric_Start_Update();
+		Fric_Ready_Update();
 
 #if USE_REFEREE_BULLET_SPEED_LOOP
 		Shoot_Bullet_Update();
@@ -310,23 +340,13 @@ void Shoot_Task(void const *argument)
 		Fric_Motor_Current_Control();
 		Dial_Motor_Control();
 
-		vTaskDelay(2);
+		Allocate_Can_Msg(fric_motor[0].give_current, fric_motor[1].give_current, 0, 0, CAN_FRIC_CMD);
+
+		// if(cnt % 2 == 0)
+		Allocate_Can_Msg(LK_MOTOR_TORQUE_CONTROL_CMD_ID, 0, LK_dial_motor.give_current, 0, CAN_DIAL_CMD);
+
+		cnt == 120 ? cnt = 1 : cnt++; // div等于2,3,4,5的最小公倍数时重置
+
+		vTaskDelay(3);
 	}
 }
-
-// pwm控制摩擦轮
-// void Fric_PWR(uint8_t power){
-//	if(power){
-//		if(TIM1->CCR1 < fric_speed){       //摩擦轮PWM值未到
-//			TIM1->CCR1 += 3, TIM1->CCR2 += 3;
-//       TIM1->CCR3 += 3, TIM1->CCR4 += 3;
-//		}
-//			shoot_flag=1;
-//	}
-//	else{
-//		if(TIM1->CCR1 >= 1000){
-//			TIM1->CCR1 -= 4,TIM1->CCR2 -= 4;
-//       TIM1->CCR3 -= 4,TIM1->CCR4 -= 4;
-//		}
-//	}
-// }

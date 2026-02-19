@@ -108,6 +108,7 @@ float uint_to_float(int x_int, float x_min, float x_max, int bits)
  */
 int float_to_uint(float x, float x_min, float x_max, int bits)
 {
+    x = limit(x, x_min, x_max);
     float span = x_max - x_min;
     float offset = x_min;
     return (int)((x - offset) * ((float)((1 << bits) - 1)) / span);

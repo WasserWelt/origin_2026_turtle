@@ -21,8 +21,6 @@
 #define Referee_FIFOInit fifo_s_init
 #define Max(a, b) ((a) > (b) ? (a) : (b))
 
-#define ROBOT_ID_MYSELF Robot_ID_Red_Hero
-
 /* Private variables ---------------------------------------------------------*/
 /* 裁判系统串口双缓冲区 */
 uint8_t Referee_Buffer[2][REFEREE_USART_RX_BUF_LENGHT];
