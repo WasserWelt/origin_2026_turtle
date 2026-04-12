@@ -130,7 +130,8 @@ static void Set_Rotate_Wz(fp32 *wz);
 static void Call_Chassis_Mode_Handler(chassis_mode_t mode);
 static void Chassis_Vector_To_Steer_Angle(const fp32 vx_set, const fp32 vy_set, const fp32 wz_set, chassis_mode_t mode);
 static void Chassis_Vector_To_Wheel_Speed(const fp32 vx_set, const fp32 vy_set, const fp32 wz_set, chassis_mode_t mode);
-static void Chassis_Motor_PID_Current_Set(chassis_mode_t mode);
+static int16_t Bumpy_Steer_Stuck_Compensation(uint8_t i); 
+static void Chassis_Motor_Control_Current_Set(chassis_mode_t mode);
 void Chassis_Task(void const *argument);
 
 /**
@@ -386,15 +387,7 @@ static void Set_Chassis_VxVy(fp32 yaw_chassis_zero_rad, fp32 *chassis_vx, fp32 *
 			if (nav_ctrl.updownhill_state == 2)
 				ramp_coeff = 0.03f;
 			else
-<<<<<<< HEAD
 				ramp_coeff = 0.7f;
-=======
-<<<<<<< HEAD
-				ramp_coeff = 0.7f;
-=======
-				ramp_coeff = 0.01f;
->>>>>>> 2716c373a05c3fed771023a7d8403f96ef74b1c3
->>>>>>> ab126336ff40d6cadd1fe3c986f5c365757dc319
 
 			gimbal_vx = ramp_control(gimbal_vx, (my_fabsf(nav_ctrl.vx) < 0.01 ? 0 : nav_ctrl.vx) * M_PER_SEC_TO_RPM, ramp_coeff);
 			gimbal_vy = ramp_control(gimbal_vy, (my_fabsf(nav_ctrl.vy) < 0.01 ? 0 : nav_ctrl.vy) * M_PER_SEC_TO_RPM, ramp_coeff);
@@ -567,7 +560,7 @@ static void chassis_safe_handler(void)
 /**
  * @brief  根据不同底盘模式执行对应底盘控制函数，在控制函数内将云台坐标系下的目标速度转化到底盘坐标系下
  *         注意：1.在小陀螺模式和底盘跟随模式下，底盘xy轴目标速度的赋值逻辑相同，wz角速度目标值赋值逻辑不同
- * 				 2.失能模式下，直接对八个舵轮电机电流值赋0，在task的while(1)中后续调用Chassis_Vector_To_Steer_Angle函数，Chassis_Vector_To_Wheel_Speed函数，Chassis_Motor_PID_Current_Set函数时会直接返回
+ * 				 2.失能模式下，直接对八个舵轮电机电流值赋0，在task的while(1)中后续调用Chassis_Vector_To_Steer_Angle函数，Chassis_Vector_To_Wheel_Speed函数，Chassis_Motor_Control_Current_Set函数时会直接返回
  *         综上：在小陀螺模式和底盘跟随模式下计算xy轴目标速度时调用同一函数 Set_Chassis_VxVy（），计算目标角速度时根据底盘当前模式调用不同函数
  */
 static void Call_Chassis_Mode_Handler(chassis_mode_t mode)
@@ -701,16 +694,56 @@ static void Chassis_Vector_To_Wheel_Speed(const fp32 vx_set, const fp32 vy_set, 
 	}
 }
 /**
- * @brief  通过pid计算出舵电机和轮电机的目标电流
+ * @brief  颠簸路段舵卡住后脱困策略,若监测到卡住则补偿一段时间的定值电流
+ * @param  i: 舵轮索引 (0~3)
+ * @retval 补偿电流值
  */
-static void Chassis_Motor_PID_Current_Set(chassis_mode_t mode)
+static int16_t Bumpy_Steer_Stuck_Compensation(uint8_t i)
+{
+	static uint16_t steer_stuck_count[4] = {0}; // 用于记录舵轮卡住的时间
+
+	if (chassis_control.chassis_max_power_mode != PASS_BUMPY)
+	{
+		steer_stuck_count[i] = 0; // 非颠簸路段不计数
+		return 0;
+	}
+
+	// 计算角度误差
+	fp32 angle_error = chassis_steer_motor[i].angle_set - chassis_steer_motor[i].angle_now;
+
+	// 检测舵是否卡住
+	if (my_fabsf(angle_error) > 15.0f && my_fabsf(chassis_steer_motor[i].speed_now) < 10.0f 
+	&& my_fabsf(chassis_steer_motor[i].give_current) > my_fabsf(0.8f * chassis_steer_motor[i].speed_pid.Kp * (chassis_steer_motor[i].speed_set - chassis_steer_motor[i].speed_now)))
+	{
+		steer_stuck_count[i]++;
+		if (steer_stuck_count[i] > 150) // 持续阻塞约300ms后开始补偿
+		{
+			// 防止计数器溢出
+			if (steer_stuck_count[i] > 1000) steer_stuck_count[i] = 1000;
+			
+			// 根据误差方向施加额外的堵转前馈电流，助力脱困 (具体大小可依调车情况修改)
+			return (angle_error > 0) ? 10000 : -10000;
+		}
+	}
+	else
+	{
+		steer_stuck_count[i] = 0; // 恢复正常或误差极小，计数清零
+	}
+
+	return 0;
+}
+
+/**
+ * @brief  通过pid,前馈计算出舵电机和轮电机的目标电流
+ */
+static void Chassis_Motor_Control_Current_Set(chassis_mode_t mode)
 {
 	if (mode == CHASSIS_SAFE)
 		return;
 
 	for (uint8_t i = 0; i < 4; i++)
 	{
-		if (nav_ctrl.chassis_target_mode == NAV_CHASSIS_FOLLOW_GIMBAL || my_fabsf(chassis_control.current_wz * DEGREE_TO_RAD) > 5.0)
+		if (chassis_control.chassis_max_power_mode == PASS_BUMPY || my_fabsf(chassis_control.current_wz * DEGREE_TO_RAD) > 5.0)
 		{
 			chassis_steer_motor[i].angle_pid.Kp = STEER_MOTOR_AGGRESIVE_ANGLE_PID_KP;
 			chassis_steer_motor[i].angle_pid.Ki = STEER_MOTOR_AGGRESIVE_ANGLE_PID_KI;
@@ -720,6 +753,10 @@ static void Chassis_Motor_PID_Current_Set(chassis_mode_t mode)
 		chassis_steer_motor[i].speed_set = chassis_steer_motor[i].angle_pid.out + STEER_MOTOR_SPEED_FF * (chassis_steer_motor[i].angle_set - chassis_steer_motor[i].angle_set_last);
 		PID_calc(&chassis_steer_motor[i].speed_pid, chassis_steer_motor[i].speed_now, chassis_steer_motor[i].speed_set);
 		chassis_steer_motor[i].give_current = (int16_t)chassis_steer_motor[i].speed_pid.out + STEER_MOTOR_CURRENT_FF * (chassis_steer_motor[i].speed_set - chassis_steer_motor[i].speed_set_last);
+		
+		// 叠加颠簸路段防卡住前馈补偿
+		chassis_steer_motor[i].give_current += Bumpy_Steer_Stuck_Compensation(i);
+
 		chassis_steer_motor[i].give_current = limit(chassis_steer_motor[i].give_current, -16000.0f, 16000.0f);
 
 		PID_calc(&chassis_wheel_motor[i].speed_pid, chassis_wheel_motor[i].speed_now, chassis_wheel_motor[i].speed_set);
@@ -745,7 +782,7 @@ void Chassis_Task(void const *argument)
 		Call_Chassis_Mode_Handler(chassis_control.chassis_mode);
 		Chassis_Vector_To_Steer_Angle(chassis_target_speed.vx, chassis_target_speed.vy, chassis_target_speed.wz, chassis_control.chassis_mode);
 		Chassis_Vector_To_Wheel_Speed(chassis_target_speed.vx, chassis_target_speed.vy, chassis_target_speed.wz, chassis_control.chassis_mode);
-		Chassis_Motor_PID_Current_Set(chassis_control.chassis_mode);
+		Chassis_Motor_Control_Current_Set(chassis_control.chassis_mode);
 
 		power_limitor.weight_allocate_mode = (chassis_control.chassis_max_power_mode == PASS_BUMPY) ? PASS_BUMPY_ALLOCATE : NORMAL_WEIGHT_ALLOCATE;
 		Chassis_Power_Control(&power_limitor, chassis_wheel_motor, chassis_steer_motor, chassis_control.chassis_max_power, power_limitor.weight_allocate_mode);

@@ -26,7 +26,7 @@ typedef struct
 	bool_t dial_over_temperatue;		   // 拨盘电机是否过温
 	int16_t fric_target_rpm;			   // 摩擦轮目标转速
 	uint16_t cooling_limit_cnt;			   // 热量保护计数
-	float current_heat_without_referee; // 不依赖裁判系统的当前热量
+	float current_heat_without_referee; // 自主计算的当前热量，裁判系统数据仅用作校准
 	uint8_t dial_back_flag;			   //退蛋保护标志
 } shoot_control_t;
 
@@ -219,7 +219,7 @@ void Fric_Motor_Current_Control(void)
 }
 
 /**
- * @description:自主计算当前热量
+ * @description:结合裁判系统数据，自主计算当前热量
  * @return 当前热量
  */
 float Get_Current_Heat(void)
@@ -227,6 +227,7 @@ float Get_Current_Heat(void)
 	static float current_heat = 0.0f;
 	static uint16_t last_robot_hp = 0;			  // 上一次记录的机器人血量,用于判断是否刚刚复活
 	static uint32_t shoot_suspect_start_time = 0; // 记录进入嫌疑状态的系统时间
+	static uint32_t heat_error_suspect_start_time = 0; // 记录进入热量误差嫌疑状态的系统时间
 
 	typedef enum // 热量计算状态机
 	{
@@ -243,8 +244,10 @@ float Get_Current_Heat(void)
 	const float CURRENT_MAX_THRESHOLD = 5500.0f;	// 摩擦轮反馈电流绝对值最大阈值 (可根据实际情况调整)
 	const float CURRENT_MIN_THRESHOLD = 1500.0f;    // 摩擦轮反馈电流绝对值最小阈值 (可根据实际情况调整)
 	const float CURRENT_FELL_DOWN = 1000.0f;		//摩擦轮反馈电流下沿
-	const uint32_t SUSPECT_TIME_THRESHOLD = 5; // 嫌疑状态持续时间阈值(ms)，超过此时间则判定为发射完成
-	const uint32_t CHECK_FAILED_TIME = 50;		
+	const uint32_t SUSPECT_TIME_THRESHOLD = 5; // 嫌疑状态持续时间阈值(ms)，超过此时间则进入等待电流下降状态
+	const uint32_t CHECK_FAILED_TIME = 50;		// 等待摩擦轮反馈电流下沿时间阈值(ms)，超过此时间则判定为发射失败
+	const uint32_t HEAT_CHECK_ERROR_TIME = 200; // 检测裁判系统误差并持续到裁判系统收敛的时间
+
 	// 判断是否刚刚复活
 	bool_t is_robot_reborn = (Game_Robot_State.current_HP != 0 && last_robot_hp == 0);
 	last_robot_hp = Game_Robot_State.current_HP;
@@ -252,8 +255,12 @@ float Get_Current_Heat(void)
 	if (is_robot_reborn || shoot_control.dial_back_flag)
 	{
 		shoot_state = SHOOT_STEP_READY;
-		if(is_robot_reborn)
-		  	current_heat = 0.0f; // 刚复活热量清零
+		
+		// 刚复活热量清零 (只有发生复活时才执行，与 dial_back_flag 独立)
+		if (is_robot_reborn)
+		{
+			current_heat = 0.0f; 
+		}
 	}
 	else
 	{
@@ -317,14 +324,28 @@ float Get_Current_Heat(void)
 	float dt = (current_time - last_time) / 1000.0f;
 	last_time = current_time;
 
+	// 向上误差补偿
+	if ((current_heat - Power_Heat_Data.shooter_17mm_barrel_heat) < 0)
+	{
+		current_heat = (float)Power_Heat_Data.shooter_17mm_barrel_heat;
+	}
+
+	// 同步裁判系统误差（如果误差存在并持续到裁判系统收敛，就同步误差）
+	if ((current_heat - Power_Heat_Data.shooter_17mm_barrel_heat) < 20) // 出现两发小弹丸的热量误差
+	{
+		heat_error_suspect_start_time = xTaskGetTickCount();
+	}
+	if ((xTaskGetTickCount() - heat_error_suspect_start_time) > HEAT_CHECK_ERROR_TIME) // 持续到足够让裁判系统收敛的时间
+	{
+		current_heat -= 10;
+		heat_error_suspect_start_time = xTaskGetTickCount();
+	}
 	// 按冷却速率更新热量
 	current_heat -= (float)Game_Robot_State.shooter_barrel_cooling_value * dt;
 	
 	// 限制最低热量为 0
 	current_heat = (current_heat < 0.0f ? 0.0f : current_heat);
 	
-	
-
 	return current_heat;
 }
 /**
@@ -336,7 +357,7 @@ void Dial_Speed_Set(fp32 *dial_speed)
 #if HAVE_REFEREE_SYSTEM
 	if ((rc_ctrl.rc.s[1] == RC_SW_UP || (NUC_Data_Receive.small_yaw_aim != 0) || (rc_ctrl.rc.s[1] == RC_SW_MID && rc_ctrl.rc.s[0] == RC_SW_UP)) && Game_Robot_State.power_management_shooter_output == 0x01) // 判断是否要进行热量保护,快超热量了就把拨弹盘目标速度定为0一段时间
 	{
-		if ((Power_Heat_Data.shooter_17mm_barrel_heat >= (Game_Robot_State.shooter_barrel_heat_limit - 60)))  
+		if ((shoot_control.current_heat_without_referee >= (Game_Robot_State.shooter_barrel_heat_limit - 10)))
 		{
 			shoot_control.need_limit_heat = 1;
 		}
@@ -408,7 +429,7 @@ void Dial_Motor_Control(void)
 		else
 			return; // 时间阈值没到，target_current继续保持5000或-5000
 	}
-	if (abs(LK_dial_motor.give_current) > (0.85 * LK_dial_motor.speed_pid.Kp * DIAL_SPEED_HIGH) && fabs(LK_dial_motor.speed_now) < 20 && !toe_is_error(DIAL_MOTOR_TOE) && shoot_control.fric_ready) // 波蛋盘电机给定电流较大但是转速很小，说明拨弹盘卡住了
+	if (abs(LK_dial_motor.give_current) > (0.85f * LK_dial_motor.speed_pid.Kp * DIAL_SPEED_HIGH) && my_fabsf(LK_dial_motor.speed_now) < 20.0f && !toe_is_error(DIAL_MOTOR_TOE) && shoot_control.fric_ready) // 波蛋盘电机给定电流较大但是转速很小，说明拨弹盘卡住了
 	{
 		dial_stop_cnt++;
 		if (dial_stop_cnt > 300)
@@ -441,10 +462,9 @@ void Shoot_Task(void const *argument)
 		Shoot_Motor_Data_Update();
 		Fric_Start_Update();
 		Fric_Ready_Update();
-		shoot_control.current_heat_without_referee = Get_Current_Heat();  
-
+		
 #if HAVE_REFEREE_SYSTEM
-		shoot_control.current_heat_calc_by_myself = Get_Current_Heat();
+		shoot_control.current_heat_without_referee = Get_Current_Heat();  
 #endif
 
 #if USE_REFEREE_BULLET_SPEED_LOOP
@@ -458,8 +478,7 @@ void Shoot_Task(void const *argument)
 		Allocate_Can_Msg(fric_motor[0].give_current, fric_motor[1].give_current, 0, 0, CAN_FRIC_CMD);
 
 		Allocate_Can_Msg(LK_MOTOR_TORQUE_CONTROL_CMD_ID, 0, LK_dial_motor.give_current, 0, CAN_DIAL_CMD);
-		//Vofa_Send_Data4(LK_dial_motor.speed_now, LK_dial_motor.speed_set, 0, 0);
-		Vofa_Send_Data4(shoot_control.current_heat_without_referee*(-100), motor_measure_fric[0].given_current, motor_measure_fric[1].given_current, 0);
+		// Vofa_Send_Data4(shoot_control.current_heat_without_referee*(-100), motor_measure_fric[0].given_current, motor_measure_fric[1].given_current, 0);
 
 		cnt == 120 ? cnt = 1 : cnt++; // div等于2,3,4,5的最小公倍数时重置
 
