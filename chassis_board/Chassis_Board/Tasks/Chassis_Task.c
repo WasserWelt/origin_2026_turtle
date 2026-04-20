@@ -47,8 +47,9 @@ typedef struct // 底盘控制参数结构体
 	fp32 chassis_max_power;			  // 底盘最大功率限制值，单位：W
 	fp32 referee_chassis_power_limit; // 来自裁判系统的底盘功率上限，单位：W
 	fp32 current_wz;
-	uint8_t steer_stuck_status[4];    // 记录对应舵电机是否卡住 (1: 卡住, 0: 正常)
+	uint8_t steer_stuck_status[4];    // 记录对应舵电机是否卡住 (1: 卡住, 0: 正常) // TODO: 全向不需要
 
+	// is_stop 和 is_stop_last 全向不需要
 	bool_t is_stop;					   // 当前是否停车
 	bool_t is_stop_last;			   // is_stop_last在定义时一定要初始化为TRUE,保证在进入非失能模式的时候先初始化轮电机旋转方向
 	bool_t need_restore_buffer_energy; // 是否需要恢复缓冲能量
@@ -134,6 +135,7 @@ void Chassis_Task(void const *argument);
 /**
  * @description: 初始化底盘pid
  * @return {*}
+ * TODO: 全向要改
  */
 static void Chassis_Motor_Pid_Init(void)
 {
@@ -156,6 +158,7 @@ static void Chassis_Motor_Pid_Init(void)
 /**
  * @description: 1.更新底盘当前角速度用于补偿陀螺状态下的底盘跟随云台夹角 2.根据电机反馈值更新电机的速度，位置信息，并且在此函数内完成大yaw轴达秒电机位置值的归一化.
  * @return {*}
+ * TODO: 全向要改
  */
 static void Chassis_Data_Update(void)
 {
@@ -340,6 +343,7 @@ static fp32 Find_Chassis_Follow_Gimbal_ZERO(fp32 current_yaw_angle)
  * @return {*}
  * @param {fp32} *target_angle 目标角度
  * @param {fp32} current_angle 当前角度
+ * TODO: 全向不需要
  */
 static fp32 Find_Steer_Min_Angle(fp32 target_angle, fp32 current_angle)
 {
@@ -571,6 +575,7 @@ static void Call_Chassis_Mode_Handler(chassis_mode_t mode)
  * @param {fp32} vy_set 底盘坐标系下y轴目标速度
  * @param {fp32} wz_set 底盘坐标系下z轴目标角速度
  * @param {chassis_mode_t} mode
+ * TODO: 全向不需要
  */
 static void Chassis_Vector_To_Steer_Angle(const fp32 vx_set, const fp32 vy_set, const fp32 wz_set, chassis_mode_t mode)
 {
@@ -669,6 +674,7 @@ static void Chassis_Vector_To_Steer_Angle(const fp32 vx_set, const fp32 vy_set, 
  * @param {fp32} vy_set 底盘坐标系下y轴目标速度，单位rpm
  * @param {fp32} wz_set 底盘坐标系下z轴目标角速度
  * @param {chassis_mode_t} mode
+ * TODO: 全向要改解算
  */
 static void Chassis_Vector_To_Wheel_Speed(const fp32 vx_set, const fp32 vy_set, const fp32 wz_set, chassis_mode_t mode)
 {
@@ -693,6 +699,7 @@ static void Chassis_Vector_To_Wheel_Speed(const fp32 vx_set, const fp32 vy_set, 
 /**
  * @brief  检测过颠簸路段时的卡舵状态
  * @note   更新 chassis_control.steer_stuck_status 数组
+ * TODO: 全向不需要
  */
 static void Check_Bumpy_Steer_Stuck(void)
 {
@@ -756,6 +763,7 @@ static void Check_Bumpy_Steer_Stuck(void)
 
 /**
  * @brief  通过pid,前馈计算出舵电机和轮电机的目标电流
+ * TODO: 全向删舵
  */
 static void Chassis_Motor_Control_Current_Set(chassis_mode_t mode)
 {

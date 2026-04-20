@@ -252,7 +252,9 @@ const error_t *get_error_list_point(void)
 {
     return error_list;
 }
-
+/**
+ * TODO: 舵轮要删掉
+ */
 static void detect_init(uint32_t time)
 {
     //设置离线时间，上线稳定工作时间，优先级 offlineTime onlinetime priority
