@@ -19,26 +19,28 @@
 #define BIG_YAW_DM6006_RecID 0x300           // CAN2,下板需要接收大yaw的电机位置数据用于底盘跟随云台
 #define GIMBAL_TO_CHASSIS_FIRST_RecID 0x10  // CAN2
 #define GIMBAL_TO_CHASSIS_SECOND_RecID 0x11 // CAN2
-#define STEER1_GM6020_RecID 0x205            // CAN1
-#define STEER2_GM6020_RecID 0x206            // CAN1
-#define STEER3_GM6020_RecID 0x207            // CAN1
-#define STEER4_GM6020_RecID 0x208            // CAN1
+// ============== 底盘舵电机ID (已移除，改用全向轮) ==============
+// #define STEER1_GM6020_RecID 0x205            // CAN1
+// #define STEER2_GM6020_RecID 0x206            // CAN1
+// #define STEER3_GM6020_RecID 0x207            // CAN1
+// #define STEER4_GM6020_RecID 0x208            // CAN1
 
-#define WHEEL1_M3508_RecID 0x201 // CAN1
-#define WHEEL2_M3508_RecID 0x202 // CAN1
-#define WHEEL3_M3508_RecID 0x203 // CAN1
-#define WHEEL4_M3508_RecID 0x204 // CAN1
-#define CAP_RecID 0x130          // CAN1 超电
-#define POWER_METER_RecID 0x123  // CAN1,功率计
+#define WHEEL1_M3508_RecID 0x201 // CAN2
+#define WHEEL2_M3508_RecID 0x202 // CAN2
+#define WHEEL3_M3508_RecID 0x203 // CAN2
+#define WHEEL4_M3508_RecID 0x204 // CAN2
+#define CAP_RecID 0x130          // CAN2 超电
+#define POWER_METER_RecID 0x123  // CAN2,功率计
 /*********************************CAN发送ID*******************************************/
-#define STEER_GM6020_TransID 0x1FE // CAN1,4个6020一起发
-#define WHEEL_M3508_TransID 0x200  // CAN1,4个3508一起发
-#define CAP_TransID 0x140          // CAN1 超电
-#define POWER_METER_TransID 0x124  // CAN1,功率计
+// #define STEER_GM6020_TransID 0x1FE // CAN1,4个6020一起发
+#define WHEEL_M3508_TransID 0x200  // CAN2,4个3508一起发
+#define CAP_TransID 0x140          // CAN2 超电
+#define POWER_METER_TransID 0x124  // CAN2,功率计
+
 
 typedef enum
 {
-    CAN_STEER_GM6020_CMD,
+//     CAN_STEER_GM6020_CMD,  // 已移除，改用全向轮
     CAN_WHEEL_M3508_CMD,
     CAN_CAP_CMD,
 } CAN_CMD_ID; // CAN发送命令类型,用于把不同的can消息送入对应消息队列统一发送

@@ -46,9 +46,9 @@ QueueHandle_t CAN1_send_queue; // CAN1消息队列句柄,此队列用于储存CAN1的发送消息
 QueueHandle_t CAN2_send_queue; // CAN2消息队列句柄，此队列用于储存CAN2的发送消息
 
 #define CAN_SEND_QUEUE_LENGTH 128
-#define STEER_GM6020_SEND_QUEUE CAN1_send_queue
-#define WHEEL_M3508_SEND_QUEUE CAN1_send_queue
-#define CAP_SEND_QUEUE CAN1_send_queue
+#define STEER_GM6020_SEND_QUEUE CAN2_send_queue  // 已移除转向电机，保留队列名兼容
+#define WHEEL_M3508_SEND_QUEUE CAN2_send_queue
+#define CAP_SEND_QUEUE CAN2_send_queue
 /*********************************************CAN发送消息实例*********************************************************************/
 CanTxMsgTypeDef steer_send_msg; // 传rc_ctrl.rc.ch数组的前四个元素的can报文全局缓冲区
 CanTxMsgTypeDef wheel_send_msg; // 传rc_ctrl.rc.ch数组的第五个元素和rc_ctrl.rc.s数组的can报文全局缓冲区
@@ -76,13 +76,14 @@ void Can_Filter_Init(void)
     HAL_CAN_Start(&hcan1);
     HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
 
-    can_filter.FilterActivation = ENABLE;  //can2配置为只接收大yaw,遥控器和导航的can报文
+    // CAN2配置为接收：大yaw、云台到下板数据、4个轮电机3508
+    can_filter.FilterActivation = ENABLE;
     can_filter.FilterMode = CAN_FILTERMODE_IDLIST;
     can_filter.FilterScale = CAN_FILTERSCALE_16BIT;
     can_filter.FilterIdHigh = (GIMBAL_TO_CHASSIS_FIRST_RecID << 5);
     can_filter.FilterIdLow = (GIMBAL_TO_CHASSIS_SECOND_RecID << 5);
-    can_filter.FilterMaskIdHigh = (BIG_YAW_DM6006_RecID << 5);
-    can_filter.FilterMaskIdLow = 0x0000;
+    can_filter.FilterMaskIdHigh = (WHEEL1_M3508_RecID << 5);
+    can_filter.FilterMaskIdLow = (BIG_YAW_DM6006_RecID << 5);
     can_filter.FilterBank = 14;
     can_filter.FilterFIFOAssignment = CAN_RX_FIFO0;
     HAL_CAN_ConfigFilter(&hcan2, &can_filter);
@@ -102,7 +103,7 @@ void Can_Msg_Init(void)
         CanTxMsgTypeDef *msg;
         uint32_t stdId;
     } buffer_list[] = {
-        {&steer_send_msg, STEER_GM6020_TransID},
+        // {&steer_send_msg, STEER_GM6020_TransID},  // 已移除，转向电机改全向轮
         {&wheel_send_msg, WHEEL_M3508_TransID},
         {&cap_send_msg, CAP_TransID}};
 
@@ -148,39 +149,54 @@ float EnergyDataToFloat(const uint8_t dat[8])
 }
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-    	// static int flag = 0;
-    	// static float start_time = 0;
+    // static int flag = 0;
+    // static float start_time = 0;
 
-    	// if (flag == 0)
-    	// {
-    	// 	start_time = DWT_GetTimeline_ms();
-    	// 	flag = 1;
-        // trans = 1;
-        // }
-    	// if (flag == 1)
-    	// {
-    	// 	if (DWT_GetTimeline_ms() - start_time > 1000)
-    	// 	{
-    	// 		flag = 0;
-    	// 		trans = 0;
-		// 			for(int j = 0; j < 8; j ++)
-        //         {
-        //             if(can_rec_cnt[j] < 500)
-        //             can_err_cnt[j]++;
-        //         }
-        //         if(can_rec_cnt[8] < 51)
-        //         {
-        //             can_err_cnt[8]++;
-        //         }
-                
-        //         for (int j = 0; j < 9; j++)
-        //             can_rec_cnt[j] = 0;
-    	// 	}
-    	// }
+    // if (flag == 0)
+    // {
+    // 	start_time = DWT_GetTimeline_ms();
+    // 	flag = 1;
+    // trans = 1;
+    // }
+    // if (flag == 1)
+    // {
+    // 	if (DWT_GetTimeline_ms() - start_time > 1000)
+    // 	{
+    // 		flag = 0;
+    // 		trans = 0;
+    // 			for(int j = 0; j < 8; j ++)
+    //         {
+    //             if(can_rec_cnt[j] < 500)
+    //             can_err_cnt[j]++;
+    //         }
+    //         if(can_rec_cnt[8] < 51)
+    //         {
+    //             can_err_cnt[8]++;
+    //         }
+            
+    //         for (int j = 0; j < 9; j++)
+    //             can_rec_cnt[j] = 0;
+    // 	}
+    // }
 
     uint8_t rx_data[8];
 
     if (hcan == &hcan1)
+    {
+        HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data);
+        // CAN1保留大yaw接收 // 下板只需要DM6006的位置数据完成底盘跟随云台
+        switch (rx_header.StdId)
+        {
+        case BIG_YAW_DM6006_RecID:
+        {
+            DM_big_yaw_motor.id = (rx_data[0]) & 0x0F;
+            DM_big_yaw_motor.state = (rx_data[0]) >> 4;
+            DM_big_yaw_motor.p_int = (rx_data[1] << 8) | rx_data[2];
+            break;
+        }
+        }
+    }
+    if (hcan == &hcan2)
     {
         HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data);
 
@@ -194,67 +210,10 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             uint8_t i = rx_header.StdId - WHEEL1_M3508_RecID;
             get_motor_measure(&motor_measure_wheel[i], rx_data);
             detect_hook(WHEEL_MOTOR_1_TOE + i);
-
-            // if(trans == 1)
-            // {
-            //     can_rec_cnt[i] ++;
-            // }
-
             break;
         }
 
-        case STEER1_GM6020_RecID:
-        case STEER2_GM6020_RecID:
-        case STEER3_GM6020_RecID:
-        case STEER4_GM6020_RecID:
-        {
-            uint8_t i = rx_header.StdId - STEER1_GM6020_RecID;
-            get_motor_measure(&motor_measure_steer[i], rx_data);
-            detect_hook(STEER_MOTOR_1_TOE + i);
 
-            // if (trans == 1)
-            // {
-            //     can_rec_cnt[rx_header.StdId - WHEEL1_M3508_RecID]++;
-            // }
-
-            break;
-        }
-
-        case CAP_RecID:
-        {
-            update_cap(rx_data);
-            detect_hook(CAP_TOE);
-            break;
-        }
-
-        case POWER_METER_RecID:
-        {
-            real_power = EnergyDataToFloat(rx_data);
-            // if (trans == 1)
-            // {
-            //     can_rec_cnt[8]++;
-            // }
-
-            break;
-        }
-        default:
-        {
-            break;
-        }
-        }
-    }
-    if (hcan == &hcan2)
-    {
-        HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data);
-        switch (rx_header.StdId)
-        {
-        case BIG_YAW_DM6006_RecID: // 下板只需要DM6006的位置数据完成底盘跟随云台
-        {
-            DM_big_yaw_motor.id = (rx_data[0]) & 0x0F;
-            DM_big_yaw_motor.state = (rx_data[0]) >> 4;
-            DM_big_yaw_motor.p_int = (rx_data[1] << 8) | rx_data[2];
-            break;
-        }
         case GIMBAL_TO_CHASSIS_FIRST_RecID:
         {
             uint8_t rc_connected;
@@ -273,7 +232,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         {
             int nav_vx_int = (rx_data[1] << 8) | rx_data[0];
             int nav_vy_int = (rx_data[3] << 8) | rx_data[2];
-            
+
             nav_ctrl.vx = uint_to_float(nav_vx_int,NAV_MIN_SPEED,NAV_MAX_SPEED,12);
             nav_ctrl.vy = uint_to_float(nav_vy_int, NAV_MIN_SPEED, NAV_MAX_SPEED, 12);
             nav_ctrl.chassis_target_mode = rx_data[4] & 0x03; // chassis_target_mode对应rx_data[4]最低两位,下面的flag以此类推
@@ -284,6 +243,17 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             nav_ctrl.game_start = (rx_data[6] >> 3) & 0x01;
 
             detect_hook(NAV_TOE);
+            break;
+        }
+        case CAP_RecID:
+        {
+            update_cap(rx_data);
+            detect_hook(CAP_TOE);
+            break;
+        }
+        case POWER_METER_RecID:
+        {
+            real_power = EnergyDataToFloat(rx_data);
             break;
         }
         default:
@@ -307,16 +277,6 @@ void Allocate_Can_Msg(int16_t data1, int16_t data2, int16_t data3, int16_t data4
 
     switch (can_cmd_id)
     {
-    case CAN_STEER_GM6020_CMD:
-    {
-        for (int i = 0; i < 4; i++)
-        {
-            steer_send_msg.data[2 * i] = (data_array[i] >> 8) & 0xFF; // 高8位
-            steer_send_msg.data[2 * i + 1] = data_array[i] & 0xFF;    // 低8位
-        }
-        xQueueSend(STEER_GM6020_SEND_QUEUE, &steer_send_msg, 0); // 向队列中填充内容
-        break;
-    }
     case CAN_WHEEL_M3508_CMD:
     {
         for (int i = 0; i < 4; i++)

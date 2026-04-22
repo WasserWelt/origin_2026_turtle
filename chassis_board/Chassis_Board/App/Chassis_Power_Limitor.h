@@ -24,11 +24,13 @@
 #define M3508_K_W 1.453e-7f       // 通过拟合曲线得到
 #define M3508_K_T 1.23e-7f        // 通过拟合曲线得到
 #define M3508_STATIC_POWER 1.581f // 通过拟合曲线得到
-/* 6020电机功率模型系数 */
-#define GM6020_K_P 1.42074e-6f    // 通过计算得出，非拟合，计算公式：rpm转为rad/s的量纲变换系数(约为1/9.55)*give_current到转子转矩的转换系数((3/16384）*转矩常数)
-#define GM6020_K_W 8.9596e-7f     // 通过拟合曲线得到
-#define GM6020_K_T 3.0609e-7f     // 通过拟合曲线得到
-#define GM6020_STATIC_POWER 0.69f // 通过拟合曲线得到
+/* 6020电机功率模型系数 - 已移除，改用全向轮 */
+/*
+#define GM6020_K_P 1.42074e-6f
+#define GM6020_K_W 8.9596e-7f
+#define GM6020_K_T 3.0609e-7f
+#define GM6020_STATIC_POWER 0.69f
+*/
 
 #define MOTOR_NUM 4   // 每组电机数量，轮电机和舵电机都是4
 
@@ -53,7 +55,6 @@ typedef struct // 电机组功率模型结构体
 
 typedef enum { 
     NORMAL_WEIGHT_ALLOCATE, // 正常权重分配方式
-    PASS_BUMPY_ALLOCATE  // 颠簸路面权重分配方式
 }weight_allocate_mode_t;
 
 typedef struct // 功率控制结构体
@@ -62,12 +63,11 @@ typedef struct // 功率控制结构体
     float chassis_power_processed; // 功率控制后的底盘预测功率,调试用
     unsigned char iter_num;        // 二分法迭代次数,调试用
     float final_lambda;            // 最终拉格朗日乘子，调试用
-    weight_allocate_mode_t weight_allocate_mode; // 权重分配模式
+    // weight_allocate_mode_t weight_allocate_mode; // 权重分配模式
 
     power_model_t wheel_motors; // 轮电机组功率模型
-    power_model_t steer_motors; // 舵电机组功率模型
 } power_limitor_t;
 
-void Chassis_Power_Control(power_limitor_t *power_limiter, chassis_wheel_motor_t wheel_motor[4], chassis_steer_motor_t steer_motor[4], float P_max, weight_allocate_mode_t weight_allocate_mode, const uint8_t steer_stuck_status[4]);
+void Chassis_Power_Control(power_limitor_t *power_limiter, chassis_wheel_motor_t wheel_motor[4], float P_max);
 
 #endif

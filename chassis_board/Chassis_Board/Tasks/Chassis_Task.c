@@ -2,7 +2,7 @@
  * @file: 	Chassis_Task.c
  * @author: Shiki
  * @date:	2025.9.26
- * @brief:	2026赛季哨兵舵轮底盘任务
+ * @brief:	2026赛季哨兵全向轮底盘任务
  * @attention:
  ******************************************************************/
 #include "Chassis_Task.h"
@@ -50,8 +50,8 @@ typedef struct // 底盘控制参数结构体
 	uint8_t steer_stuck_status[4];    // 记录对应舵电机是否卡住 (1: 卡住, 0: 正常) // TODO: 全向不需要
 
 	// is_stop 和 is_stop_last 全向不需要
-	bool_t is_stop;					   // 当前是否停车
-	bool_t is_stop_last;			   // is_stop_last在定义时一定要初始化为TRUE,保证在进入非失能模式的时候先初始化轮电机旋转方向
+	// bool_t is_stop;					   // 当前是否停车
+	// bool_t is_stop_last;			   // is_stop_last在定义时一定要初始化为TRUE,保证在进入非失能模式的时候先初始化轮电机旋转方向
 	bool_t need_restore_buffer_energy; // 是否需要恢复缓冲能量
 
 	chassis_mode_t chassis_mode;
@@ -92,8 +92,8 @@ typedef struct // 底盘坐标系目标速度结构体
 // 底盘控制结构体初始化
 chassis_control_t chassis_control = {
 	.chassis_mode = CHASSIS_SAFE,
-	.is_stop = TRUE,
-	.is_stop_last = TRUE,
+	// .is_stop = TRUE,
+	// .is_stop_last = TRUE,
 };
 // 功率控制结构体初始化
 power_limitor_t power_limitor =
@@ -104,61 +104,49 @@ power_limitor_t power_limitor =
 				.k_w = M3508_K_W,
 				.k_t = M3508_K_T,
 				.p_static = M3508_STATIC_POWER,
-			},
-		.steer_motors =
-			{
-				.k_p = GM6020_K_P,
-				.k_w = GM6020_K_W,
-				.k_t = GM6020_K_T,
-				.p_static = GM6020_STATIC_POWER,
 			}};
 chassis_speed_t chassis_target_speed = {0};
 nav_ctrl_t nav_ctrl = {0};
-fp32 temp_move_angle_set[4] = {0};
 /********************************其余底盘函数声明***********************************/
 static void Chassis_Motor_Pid_Init(void);
 static void Chassis_Data_Update(void);
 static void Chassis_Mode_Update(chassis_mode_t *mode);
 static void Chassis_Max_Power_Update(fp32 *chassis_max_power);
 static fp32 Find_Chassis_Follow_Gimbal_ZERO(fp32 current_yaw_angle);
-static fp32 Find_Steer_Min_Angle(fp32 target_angle, fp32 current_angle);
 static void Set_Chassis_VxVy(fp32 yaw_nearest_zero_rad, fp32 *chassis_vx, fp32 *chassis_vy);
 static void Set_FollowGimbal_Wz(fp32 follow_gimbal_angle, fp32 *wz);
 static void Set_Rotate_Wz(fp32 *wz);
 static void Call_Chassis_Mode_Handler(chassis_mode_t mode);
-static void Chassis_Vector_To_Steer_Angle(const fp32 vx_set, const fp32 vy_set, const fp32 wz_set, chassis_mode_t mode);
-static void Chassis_Vector_To_Wheel_Speed(const fp32 vx_set, const fp32 vy_set, const fp32 wz_set, chassis_mode_t mode);
-static void Check_Bumpy_Steer_Stuck(void); 
+static void Chassis_Vector_To_Omni_Speed(const fp32 vx_set, const fp32 vy_set, const fp32 wz_set);
 static void Chassis_Motor_Control_Current_Set(chassis_mode_t mode);
 void Chassis_Task(void const *argument);
 
 /**
  * @description: 初始化底盘pid
  * @return {*}
- * TODO: 全向要改
  */
 static void Chassis_Motor_Pid_Init(void)
 {
 	const static fp32 wheel_motor_speed_pid[3] = {WHEEL_MOTOR_SPEED_PID_KP, WHEEL_MOTOR_SPEED_PID_KI, WHEEL_MOTOR_SPEED_PID_KD};
-	const static fp32 steer_motor_speed_pid[3] = {STEER_MOTOR_SPEED_PID_KP, STEER_MOTOR_SPEED_PID_KI, STEER_MOTOR_SPEED_PID_KD};
-	const static fp32 steer_motor_angle_pid[3] = {STEER_MOTOR_ANGLE_PID_KP, STEER_MOTOR_ANGLE_PID_KI, STEER_MOTOR_ANGLE_PID_KD};
 	const static fp32 chassis_follow_gimbal_pid[3] = {CHASSIS_FOLLOW_GIMBAL_PID_KP, CHASSIS_FOLLOW_GIMBAL_PID_KI, CHASSIS_FOLLOW_GIMBAL_PID_KD};
 	const static fp32 buffer_energy_pid[3] = {BUFFER_ENERGY_PID_KP, BUFFER_ENERGY_PID_KI, BUFFER_ENERGY_PID_KD};
 
 	for (uint8_t i = 0; i < 4; i++)
 	{
+		chassis_wheel_motor[i].speed_now = 0;
+		chassis_wheel_motor[i].speed_set = 0;
+		chassis_wheel_motor[i].speed_set_last = 0;
+		chassis_wheel_motor[i].give_current = 0;
+		chassis_wheel_motor[i].spin_direction = 1;
 		PID_init(&chassis_wheel_motor[i].speed_pid, PID_POSITION, wheel_motor_speed_pid, WHEEL_MOTOR_SPEED_PID_MAX_OUT, WHEEL_MOTOR_SPEED_PID_MAX_IOUT);
-		PID_init(&chassis_steer_motor[i].speed_pid, PID_POSITION, steer_motor_speed_pid, STEER_MOTOR_SPEED_PID_MAX_OUT, STEER_MOTOR_SPEED_PID_MAX_IOUT);
-		PID_init(&chassis_steer_motor[i].angle_pid, PID_POSITION, steer_motor_angle_pid, STEER_MOTOR_ANGLE_PID_MAX_OUT, STEER_MOTOR_ANGLE_PID_MAX_IOUT);
 	}
 	PID_init(&chassis_control.chassis_follow_gimbal_pid, PID_POSITION, chassis_follow_gimbal_pid, CHASSIS_FOLLOW_GIMBAL_PID_MAX_OUT, CHASSIS_FOLLOW_GIMBAL_PID_MAX_IOUT);
 	PID_init(&chassis_control.buffer_energy_pid, PID_POSITION, buffer_energy_pid, BUFFER_ENERGY_PID_MAX_OUT, BUFFER_ENERGY_PID_MAX_IOUT);
 }
 
 /**
- * @description: 1.更新底盘当前角速度用于补偿陀螺状态下的底盘跟随云台夹角 2.根据电机反馈值更新电机的速度，位置信息，并且在此函数内完成大yaw轴达秒电机位置值的归一化.
+ * @description: 1.更新底盘当前角速度用于补偿陀螺状态下的底盘跟随云台夹角 2.根据电机反馈值更新轮电机的速度信息，并且在此函数内完成大yaw轴达妙电机位置值的归一化.
  * @return {*}
- * TODO: 全向要改
  */
 static void Chassis_Data_Update(void)
 {
@@ -171,17 +159,11 @@ static void Chassis_Data_Update(void)
 	}
 	DM_big_yaw_motor.pos = DM_big_yaw_motor.p_int * DM6006_ENC_TO_DEGREE;
 
-	/********************更新舵电机位置速度信息和轮电机速度信息********************/
-	const static uint16_t steer_motor_ENC_offset[4] = {STEER_MOROR1_ENC_OFFSET, STEER_MOROR2_ENC_OFFSET, STEER_MOROR3_ENC_OFFSET, STEER_MOROR4_ENC_OFFSET};
+	/********************更新轮电机速度信息********************/
 	for (uint8_t i = 0; i < 4; i++)
 	{
-		chassis_wheel_motor[i].speed_now = toe_is_error(i) == 1 ? 0 : motor_measure_wheel[i].speed_rpm;
+		chassis_wheel_motor[i].speed_now = toe_is_error(WHEEL_MOTOR_1_TOE + i) ? 0 : motor_measure_wheel[i].speed_rpm;
 		chassis_wheel_motor[i].speed_set_last = chassis_wheel_motor[i].speed_set;
-		chassis_steer_motor[i].speed_now = toe_is_error(i + 4) == 1 ? 0 : motor_measure_steer[i].speed_rpm;
-		// 将舵电机GM6020的角度归一化到0-360度，舵轮转一圈每个位置对应唯一一个角度,并保证每个舵轮朝向相同时舵电机角度也相同，加8192是考虑motor_measure_steer[i].ecd - steer_motor_ENC_offset[i]<0的情况
-		chassis_steer_motor[i].angle_now = ((motor_measure_steer[i].ecd - steer_motor_ENC_offset[i] + 8192) % 8192) * GM6020_ENC_TO_DEGREE;
-		chassis_steer_motor[i].angle_set_last = chassis_steer_motor[i].angle_set;
-		chassis_steer_motor[i].speed_set_last = chassis_steer_motor[i].speed_set;
 	}
 }
 
@@ -336,27 +318,9 @@ static fp32 Find_Chassis_Follow_Gimbal_ZERO(fp32 current_yaw_angle)
 		if (my_fabsf(current_yaw_angle - zero_arr[i]) >= 315.0f || my_fabsf(current_yaw_angle - zero_arr[i]) <= 45.0f)
 			return zero_arr[i];
 	}
+    return CHASSIS_FOLLOW_GIMBAL_ZERO;
 }
 
-/**
- * @description:根据初步算出的舵电机目标角度和当前角度计算出使舵电机旋转路径最短的最总目标角度
- * @return {*}
- * @param {fp32} *target_angle 目标角度
- * @param {fp32} current_angle 当前角度
- * TODO: 全向不需要
- */
-static fp32 Find_Steer_Min_Angle(fp32 target_angle, fp32 current_angle)
-{
-
-	while (my_fabsf(target_angle - current_angle) > 90.0f)
-	{
-		if (target_angle - current_angle > 90.0f)
-			target_angle -= 180.0f;
-		else if (target_angle - current_angle < -90.0f)
-			target_angle += 180.0f;
-	}
-	return target_angle;
-}
 /**
  * @brief  设置云台坐标系的xy轴目标速度并将其变换到底盘坐标系下，在小陀螺模式和底盘跟随云台模式下通用
  */
@@ -545,15 +509,9 @@ static void chassis_rotate_handler(void)
  */
 static void chassis_safe_handler(void)
 {
-	chassis_control.is_stop = TRUE, chassis_control.is_stop_last = TRUE;
-	PID_clear(&chassis_control.chassis_follow_gimbal_pid); // 清零pid out
 	for (uint8_t i = 0; i < 4; i++)
 	{
-		chassis_steer_motor[i].give_current = 0;
 		chassis_wheel_motor[i].give_current = 0;
-
-		PID_clear(&chassis_steer_motor[i].speed_pid); // 清零pid out
-		PID_clear(&chassis_steer_motor[i].angle_pid); // 清零pid out
 		PID_clear(&chassis_wheel_motor[i].speed_pid); // 清零pid out
 	}
 }
@@ -561,209 +519,40 @@ static void chassis_safe_handler(void)
 /**
  * @brief  根据不同底盘模式执行对应底盘控制函数，在控制函数内将云台坐标系下的目标速度转化到底盘坐标系下
  *         注意：1.在小陀螺模式和底盘跟随模式下，底盘xy轴目标速度的赋值逻辑相同，wz角速度目标值赋值逻辑不同
- * 				 2.失能模式下，直接对八个舵轮电机电流值赋0，在task的while(1)中后续调用Chassis_Vector_To_Steer_Angle函数，Chassis_Vector_To_Wheel_Speed函数，Chassis_Motor_Control_Current_Set函数时会直接返回
  *         综上：在小陀螺模式和底盘跟随模式下计算xy轴目标速度时调用同一函数 Set_Chassis_VxVy（），计算目标角速度时根据底盘当前模式调用不同函数
  */
 static void Call_Chassis_Mode_Handler(chassis_mode_t mode)
 {
 	chassis_commands[mode]();
 }
-/**
- * @description: 通过底盘坐标系下的目标速度解算出速度四个舵电机的目标角度,并判断轮电机是正转还是反转
- * @return {*}
- * @param {fp32} vx_set 底盘坐标系下x轴目标速度
- * @param {fp32} vy_set 底盘坐标系下y轴目标速度
- * @param {fp32} wz_set 底盘坐标系下z轴目标角速度
- * @param {chassis_mode_t} mode
- * TODO: 全向不需要
- */
-static void Chassis_Vector_To_Steer_Angle(const fp32 vx_set, const fp32 vy_set, const fp32 wz_set, chassis_mode_t mode)
-{
-	if (mode == CHASSIS_SAFE)
-	{
-		return;
-	}
-
-	chassis_control.is_stop = ((my_fabsf(vx_set) <= 10.0f && my_fabsf(vy_set) <= 10.0f && my_fabsf(wz_set) <= 300.0f) ? TRUE : FALSE); // 判断当前是否停车
-
-	if (chassis_control.is_stop)
-	{
-		static uint32_t stop_start_time;
-		static uint8_t stop_flag;
-		static bool_t first_enter_stop = FALSE;
-
-		if (!chassis_control.is_stop_last) // 如果刚进入停车状态
-		{
-			stop_flag = 1;
-			first_enter_stop = TRUE;
-			stop_start_time = xTaskGetTickCount();
-		}
-
-		if (stop_flag && (xTaskGetTickCount() - stop_start_time <= pdMS_TO_TICKS(1000))) // 如果刚进入停车状态不到一秒
-		{
-			if (first_enter_stop)
-			{
-				for (int i = 0; i < 4; i++)
-					chassis_steer_motor[i].angle_set = chassis_steer_motor[i].angle_now; // 将舵电机目标角度设置为当前角度,防止急停后直接进入自锁模式翻车
-				first_enter_stop = FALSE;
-			}
-			for (int i = 0; i < 4; i++)
-				chassis_steer_motor[i].angle_set = Find_Steer_Min_Angle(chassis_steer_motor[i].angle_set, chassis_steer_motor[i].angle_now);
-		}
-		else
-		{
-			fp32 temp_stop_angle_set[4];
-			stop_flag = 0;
-			for (int i = 0; i < 4; i++) // 自锁模式，相邻舵轮之间角度差为90度
-			{
-				temp_stop_angle_set[i] = 225.0f + i * 90.0f;
-				// 选择路程最短的方向旋转，保证舵轮每次旋转的角度小于等于90度
-				chassis_steer_motor[i].angle_set = Find_Steer_Min_Angle(temp_stop_angle_set[i], chassis_steer_motor[i].angle_now);
-			}
-		}
-	}
-	else // 底盘处于运动状态
-	{
-		static fp32 last_diff[4] = {0.0f}; // 用于记录每个舵电机上一时刻temp_move_angle_set和最终的angel_set的差
-		fp32 vx_linear = wz_set * MOTOR_DISTANCE_WIDTH / (2 * MOTOR_DISTANCE_TO_CENTER);
-		fp32 vy_linear = wz_set * MOTOR_DISTANCE_LENGTH / (2 * MOTOR_DISTANCE_TO_CENTER);
-		fp32 target_angle_rad[4];
-
-		arm_atan2_f32((vy_set - vy_linear), (vx_set + vx_linear), &target_angle_rad[3]);
-		arm_atan2_f32((vy_set + vy_linear), (vx_set + vx_linear), &target_angle_rad[0]);
-		arm_atan2_f32((vy_set + vy_linear), (vx_set - vx_linear), &target_angle_rad[1]);
-		arm_atan2_f32((vy_set - vy_linear), (vx_set - vx_linear), &target_angle_rad[2]);
-
-		for (int i = 0; i < 4; i++)
-		{
-			fp32 current_diff;
-
-			temp_move_angle_set[i] = target_angle_rad[i] * RAD_TO_DEGREE; // 舵电机在运动学解算下的目标角度
-			// 先将舵电机目标角度跨度限制到0~360度
-			if (temp_move_angle_set[i] < 0.0f)
-				temp_move_angle_set[i] += 360.0f;
-			// 选择路程最短的方向旋转，保证舵轮每次旋转的角度小于等于90度
-			chassis_steer_motor[i].angle_set = Find_Steer_Min_Angle(temp_move_angle_set[i], chassis_steer_motor[i].angle_now); // angle_set单位：度
-
-			current_diff = my_fabsf(temp_move_angle_set[i] - chassis_steer_motor[i].angle_set); // 只有0，180，360三种情况
-			// 车子刚启动时，通过舵电机目标位置判断每个轮电机的旋转方向
-			if (chassis_control.is_stop_last)
-			{
-				int8_t spin_direction_init[4];
-				fp32 absolute_angle_error = my_fabsf(chassis_steer_motor[i].angle_now - temp_move_angle_set[i]);
-				spin_direction_init[i] = (absolute_angle_error > 90.0f && absolute_angle_error < 270.0f) ? 1 : -1;
-				chassis_wheel_motor[i].spin_direction = spin_direction_init[i];
-			}
-			else // 车子启动后，通过舵电机目标位置判断每个轮电机的旋转方向
-			{
-				if (my_fabsf(my_fabsf(current_diff - last_diff[i]) - 180.0f) < 0.1f) // 舵电机抄一次180度近路轮电机就需要反转一次,同时注意浮点数计算带来的误差，需要模糊判断
-				{
-					chassis_wheel_motor[i].spin_direction = -chassis_wheel_motor[i].spin_direction;
-				}
-			}
-			last_diff[i] = current_diff;
-		}
-	}
-	chassis_control.is_stop_last = chassis_control.is_stop;
-}
 
 /**
- * @description: 通过底盘坐标系下的目标速度解算出速度四个轮电机的目标速度
- * @return {*}
- * @param {fp32} vx_set 底盘坐标系下x轴目标速度，单位rpm
- * @param {fp32} vy_set 底盘坐标系下y轴目标速度，单位rpm
- * @param {fp32} wz_set 底盘坐标系下z轴目标角速度
- * @param {chassis_mode_t} mode
- * TODO: 全向要改解算
+ * @description: 通过底盘坐标系下的目标速度算出四个全向轮的目标速度（全向轮运动学逆解）
+ * @param vx_set 底盘坐标系下x轴目标速度 (rpm)
+ * @param vy_set 底盘坐标系下y轴目标速度 (rpm)
+ * @param wz_set 底盘坐标系下z轴目标角速度 (rpm)
+ * @note 全向轮布局:
+ *   wheel_speed[0] = 右前轮 (FR)
+ *   wheel_speed[1] = 左前轮 (FL)
+ *   wheel_speed[2] = 右后轮 (BR)
+ *   wheel_speed[3] = 左后轮 (BL)
  */
-static void Chassis_Vector_To_Wheel_Speed(const fp32 vx_set, const fp32 vy_set, const fp32 wz_set, chassis_mode_t mode)
+static void Chassis_Vector_To_Omni_Speed(const fp32 vx_set, const fp32 vy_set, const fp32 wz_set)
 {
-	if (mode == CHASSIS_SAFE)
-	{
-		return;
-	}
-	fp32 vx_linear = wz_set * MOTOR_DISTANCE_WIDTH / (2 * MOTOR_DISTANCE_TO_CENTER);
-	fp32 vy_linear = wz_set * MOTOR_DISTANCE_LENGTH / (2 * MOTOR_DISTANCE_TO_CENTER);
 	fp32 wheel_speed[4];
-
-	arm_sqrt_f32((vy_set - vy_linear) * (vy_set - vy_linear) + (vx_set + vx_linear) * (vx_set + vx_linear), &wheel_speed[3]);
-	arm_sqrt_f32((vy_set + vy_linear) * (vy_set + vy_linear) + (vx_set + vx_linear) * (vx_set + vx_linear), &wheel_speed[0]);
-	arm_sqrt_f32((vy_set + vy_linear) * (vy_set + vy_linear) + (vx_set - vx_linear) * (vx_set - vx_linear), &wheel_speed[1]);
-	arm_sqrt_f32((vy_set - vy_linear) * (vy_set - vy_linear) + (vx_set - vx_linear) * (vx_set - vx_linear), &wheel_speed[2]);
-
-	for (int i = 0; i < 4; i++)
-	{
-		chassis_wheel_motor[i].speed_set = wheel_speed[i] * chassis_wheel_motor[i].spin_direction; // speed_set单位：rpm
-	}
-}
-/**
- * @brief  检测过颠簸路段时的卡舵状态
- * @note   更新 chassis_control.steer_stuck_status 数组
- * TODO: 全向不需要
- */
-static void Check_Bumpy_Steer_Stuck(void)
-{
-	static uint16_t steer_stuck_count[4] = {0}; // 记录卡住的计数
-	static uint16_t steer_unstuck_count[4] = {0}; // 记录退出卡死状态的计数
-	const uint16_t STUCK_ENTER_COUNT = 150;
-	const uint16_t STUCK_EXIT_COUNT = 30;
-
-	if (chassis_control.chassis_max_power_mode != PASS_BUMPY)
-	{
-		for (uint8_t i = 0; i < 4; i++)
-		{
-			steer_stuck_count[i] = 0;
-			steer_unstuck_count[i] = 0;
-			chassis_control.steer_stuck_status[i] = 0;
-		}
-		return;
-	}
+	wheel_speed[WHEEL_MOTOR_FR] = (vx_set + vy_set) + MOTOR_DISTANCE_TO_CENTER * wz_set;
+	wheel_speed[WHEEL_MOTOR_FL] = (vx_set - vy_set) + MOTOR_DISTANCE_TO_CENTER * wz_set;
+	wheel_speed[WHEEL_MOTOR_BR] = (-vx_set + vy_set) + MOTOR_DISTANCE_TO_CENTER * wz_set;
+	wheel_speed[WHEEL_MOTOR_BL] = (-vx_set - vy_set) + MOTOR_DISTANCE_TO_CENTER * wz_set;
 
 	for (uint8_t i = 0; i < 4; i++)
 	{
-		// 计算角度误差
-		fp32 angle_error = chassis_steer_motor[i].angle_set - chassis_steer_motor[i].angle_now;
-
-		// 判定条件：误差>15度，且速度<10rpm
-		if (my_fabsf(angle_error) > 15.0f && my_fabsf((float)chassis_steer_motor[i].speed_now) < 10.0f)
-		{
-			steer_stuck_count[i]++;
-			steer_unstuck_count[i] = 0;
-			if (steer_stuck_count[i] > STUCK_ENTER_COUNT) // 持续满足条件约 150次（时间依调度频率定）判定为卡死
-			{
-				chassis_control.steer_stuck_status[i] = 1;
-				if (steer_stuck_count[i] > 1000) steer_stuck_count[i] = 1000;
-			}
-		}
-		else
-		{
-			// 退出卡死状态一段时间后（不满足卡死条件达到固定计数）才清除卡死标志
-			if (chassis_control.steer_stuck_status[i] == 1)
-			{
-				if (steer_unstuck_count[i] < STUCK_EXIT_COUNT)
-				{
-					steer_unstuck_count[i]++;
-				}
-				else
-				{
-					steer_stuck_count[i] = 0;
-					steer_unstuck_count[i] = 0;
-					chassis_control.steer_stuck_status[i] = 0;
-				}
-			}
-			else
-			{
-				steer_stuck_count[i] = 0;
-				steer_unstuck_count[i] = 0;
-				chassis_control.steer_stuck_status[i] = 0;
-			}
-		}
+		chassis_wheel_motor[i].speed_set = wheel_speed[i];
 	}
 }
 
 /**
- * @brief  通过pid,前馈计算出舵电机和轮电机的目标电流
- * TODO: 全向删舵
+ * @brief  通过pid,前馈计算出轮电机的目标电流
  */
 static void Chassis_Motor_Control_Current_Set(chassis_mode_t mode)
 {
@@ -772,26 +561,6 @@ static void Chassis_Motor_Control_Current_Set(chassis_mode_t mode)
 
 	for (uint8_t i = 0; i < 4; i++)
 	{
-		if (chassis_control.chassis_max_power_mode == PASS_BUMPY || my_fabsf(chassis_control.current_wz * DEGREE_TO_RAD) > 5.0)
-		{
-			chassis_steer_motor[i].angle_pid.Kp = STEER_MOTOR_AGGRESIVE_ANGLE_PID_KP;
-			chassis_steer_motor[i].angle_pid.Ki = STEER_MOTOR_AGGRESIVE_ANGLE_PID_KI;
-			chassis_steer_motor[i].angle_pid.Kd = STEER_MOTOR_AGGRESIVE_ANGLE_PID_KD;
-		}
-		PID_calc(&chassis_steer_motor[i].angle_pid, chassis_steer_motor[i].angle_now, chassis_steer_motor[i].angle_set);
-		chassis_steer_motor[i].speed_set = chassis_steer_motor[i].angle_pid.out + STEER_MOTOR_SPEED_FF * (chassis_steer_motor[i].angle_set - chassis_steer_motor[i].angle_set_last);
-		PID_calc(&chassis_steer_motor[i].speed_pid, chassis_steer_motor[i].speed_now, chassis_steer_motor[i].speed_set);
-		chassis_steer_motor[i].give_current = (int16_t)chassis_steer_motor[i].speed_pid.out + STEER_MOTOR_CURRENT_FF * (chassis_steer_motor[i].speed_set - chassis_steer_motor[i].speed_set_last);
-		
-		// 叠加颠簸路段防卡住前馈补偿
-		if (chassis_control.steer_stuck_status[i] == 1)
-		{
-			// 计算角度误差决定补偿方向
-			fp32 angle_error = chassis_steer_motor[i].angle_set - chassis_steer_motor[i].angle_now;	
-			chassis_steer_motor[i].give_current += my_sign(angle_error) * 10000.0f;
-		}
-		chassis_steer_motor[i].give_current = limit(chassis_steer_motor[i].give_current, -16000.0f, 16000.0f);
-		
 		PID_calc(&chassis_wheel_motor[i].speed_pid, chassis_wheel_motor[i].speed_now, chassis_wheel_motor[i].speed_set);
 		chassis_wheel_motor[i].give_current = (int16_t)chassis_wheel_motor[i].speed_pid.out + WHEEL_MOTOR_CURRENT_FF * (chassis_wheel_motor[i].speed_set - chassis_wheel_motor[i].speed_set_last);
 		chassis_wheel_motor[i].give_current = limit(chassis_wheel_motor[i].give_current, -16000.0f, 16000.0f);
@@ -804,45 +573,21 @@ void Chassis_Task(void const *argument)
 
 	vTaskDelay(200);
 
-	static uint8_t cnt = 1;
-
 	while (1)
 	{
 		Chassis_Data_Update();
 		Chassis_Mode_Update(&chassis_control.chassis_mode);
 		Chassis_Max_Power_Update(&chassis_control.chassis_max_power);
-		Check_Bumpy_Steer_Stuck(); // 更新卡舵状态
 
 		Call_Chassis_Mode_Handler(chassis_control.chassis_mode);
-		Chassis_Vector_To_Steer_Angle(chassis_target_speed.vx, chassis_target_speed.vy, chassis_target_speed.wz, chassis_control.chassis_mode);
-		Chassis_Vector_To_Wheel_Speed(chassis_target_speed.vx, chassis_target_speed.vy, chassis_target_speed.wz, chassis_control.chassis_mode);
+		Chassis_Vector_To_Omni_Speed(chassis_target_speed.vx, chassis_target_speed.vy, chassis_target_speed.wz);
 		Chassis_Motor_Control_Current_Set(chassis_control.chassis_mode);
 
-		power_limitor.weight_allocate_mode = (chassis_control.chassis_max_power_mode == PASS_BUMPY) ? PASS_BUMPY_ALLOCATE : NORMAL_WEIGHT_ALLOCATE;
-		Chassis_Power_Control(&power_limitor, chassis_wheel_motor, chassis_steer_motor, chassis_control.chassis_max_power, power_limitor.weight_allocate_mode, chassis_control.steer_stuck_status);
+		Chassis_Power_Control(&power_limitor, chassis_wheel_motor, chassis_control.chassis_max_power);
 
-		if (cnt % 5 != 0)
-		{
-			Allocate_Can_Msg(chassis_steer_motor[0].give_current, chassis_steer_motor[1].give_current, chassis_steer_motor[2].give_current, chassis_steer_motor[3].give_current, CAN_STEER_GM6020_CMD);
-			Allocate_Can_Msg(chassis_wheel_motor[0].give_current, chassis_wheel_motor[1].give_current, chassis_wheel_motor[2].give_current, chassis_wheel_motor[3].give_current, CAN_WHEEL_M3508_CMD);
-		}
+		Allocate_Can_Msg(chassis_wheel_motor[0].give_current, chassis_wheel_motor[1].give_current,
+		                 chassis_wheel_motor[2].give_current, chassis_wheel_motor[3].give_current, CAN_WHEEL_M3508_CMD);
 
-		vTaskDelay(1);
-
-		if (cnt % 5 == 0)
-		{
-			// CAN_cmd_power_meter(0, 0, 0, 2); // 功率计，随便发什么数据，发了就行
-#if HAVE_REFEREE_SYSTEM
-			if (!toe_is_error(NAV_TOE))
-				Allocate_Can_Msg(nav_ctrl.referee_power_limit - 10, 0, nav_ctrl.buffer_energy_remain, 0, CAN_CAP_CMD);
-			else
-				Allocate_Can_Msg(20, 0, 0, 0, CAN_CAP_CMD);
-#else
-			Allocate_Can_Msg(95, 0, 0, 0, CAN_CAP_CMD);
-#endif
-		}
-		// Vofa_Send_Data4(real_power, power_limitor.chassis_power_predicted, power_limitor.chassis_power_processed, power_limitor.iter_num);
-		cnt == 120 ? cnt = 1 : cnt++; // div等于2,3,4,5的最小公倍数时重置
-		vTaskDelay(1);
+		vTaskDelay(2);
 	}
 }

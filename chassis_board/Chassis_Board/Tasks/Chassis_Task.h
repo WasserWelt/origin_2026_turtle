@@ -2,7 +2,7 @@
  * @file: 	Chassis_Task.h
  * @author: Shiki
  * @date:	2025.9.26
- * @brief:	2026赛季哨兵舵轮底盘任务，存放底盘的各种控制参数的宏定义
+ * @brief:	2026赛季哨兵全向轮底盘任务，存放底盘的各种控制参数的宏定义
  * @attention:
  ******************************************************************/
 #ifndef _CHASSIS_TASK
@@ -13,27 +13,21 @@
 
 // 量纲转换参数
 #define PI 3.141592f
-#define M_PER_SEC_TO_RPM 2183.6f // m/s转rpm(注意，与舵轮半径和轮电机减速比有关)公式为 60*MOTOR_REDUCTION_RATIO/（2*pi*WHEEL_RADIUS)
+#define M_PER_SEC_TO_RPM 2183.6f // m/s转rpm(注意，与麦轮半径和轮电机减速比有关)
 #define DEGREE_TO_RAD 0.0172532f //  pi/180
 #define RAD_TO_DEGREE 57.295779f
 #define DM6006_ENC_TO_DEGREE 0.021972f //  360/16384
-#define GM6020_ENC_TO_DEGREE 0.043945f //  360/8192
 
 // 底盘运动学解算相关参数
-#define MOTOR_DISTANCE_TO_CENTER 0.2899f // 舵轮与地面的接触点到车体中心的距离
+#define MOTOR_DISTANCE_TO_CENTER 0.2899f // 轮与地面的接触点到车体中心的距离
 #define MOTOR_DISTANCE_WIDTH 0.41f // 底盘较短的轮距
 #define MOTOR_DISTANCE_LENGTH 0.41f // 底盘较长的轮距
-#define WHEEL_RADIUS 0.06f  //舵轮半径
+#define WHEEL_RADIUS 0.06f  //轮半径
 #define MOTOR_REDUCTION_RATIO 13.72f  // 轮电机减速比
 #define CHASSIS_FOLLOW_GIMBAL_BACK_ZERO 50.33f  //底盘跟随云台时的后零点，单位：度
 #define CHASSIS_FOLLOW_GIMBAL_RIGHT_ZERO 140.33f // 底盘跟随云台时的右零点
 #define CHASSIS_FOLLOW_GIMBAL_LEFT_ZERO 320.33f  // 底盘跟随云台时的左零点
 #define CHASSIS_FOLLOW_GIMBAL_ZERO 230.33f       // 底盘跟随云台时的零点，同时也是小陀螺模式下底盘vx(前进)正方向
-
-#define STEER_MOROR1_ENC_OFFSET 4782 //1号舵电机的编码器偏置（范围0-8191）
-#define STEER_MOROR2_ENC_OFFSET 7673 //2号舵电机的编码器偏置（范围0-8191）
-#define STEER_MOROR3_ENC_OFFSET 764 //3号舵电机的编码器偏置（范围0-8191）
-#define STEER_MOROR4_ENC_OFFSET 6112 //4号舵电机的编码器偏置（范围0-8191）
 
 //小陀螺相关参数
 #define ROTATE_WZ_MAX 12.0  // 小陀螺正向速度,最高速，单位：rad/s
@@ -54,24 +48,6 @@
 #define WHEEL_MOTOR_SPEED_PID_MAX_OUT 16000.0f
 #define WHEEL_MOTOR_SPEED_PID_MAX_IOUT 1000.0f
 #define WHEEL_MOTOR_CURRENT_FF 2.0f // 轮电机电流前馈系数
-
-#define STEER_MOTOR_SPEED_PID_KP 80.0f
-#define STEER_MOTOR_SPEED_PID_KI 0.02f 
-#define STEER_MOTOR_SPEED_PID_KD 0.0f
-#define STEER_MOTOR_SPEED_PID_MAX_OUT 16000.0f
-#define STEER_MOTOR_SPEED_PID_MAX_IOUT 1000.0f
-#define STEER_MOTOR_SPEED_FF 3.4f // 舵轮电机速度前馈系数
-#define STEER_MOTOR_CURRENT_FF 8.0f
-
-#define STEER_MOTOR_AGGRESIVE_ANGLE_PID_KP 12.0f //过颠簸＋高速小陀螺特化
-#define STEER_MOTOR_AGGRESIVE_ANGLE_PID_KI 0.0002f
-#define STEER_MOTOR_AGGRESIVE_ANGLE_PID_KD 2.0f
-
-#define STEER_MOTOR_ANGLE_PID_KP 4.5f //常规模式
-#define STEER_MOTOR_ANGLE_PID_KI 0.0002f
-#define STEER_MOTOR_ANGLE_PID_KD 0.7f
-#define STEER_MOTOR_ANGLE_PID_MAX_OUT 1500.0f
-#define STEER_MOTOR_ANGLE_PID_MAX_IOUT 100.0f
 
 #define CHASSIS_FOLLOW_GIMBAL_PID_KP 90.0f
 #define CHASSIS_FOLLOW_GIMBAL_PID_KI 0.0005f
@@ -99,6 +75,16 @@ typedef struct // 上板传下来的导航相关数据
 } nav_ctrl_t;
 
 extern nav_ctrl_t nav_ctrl;
+
+
+/************************全向轮麦轮布局索引***************************/
+typedef enum
+{
+    WHEEL_MOTOR_FR = 0, // 右前
+    WHEEL_MOTOR_FL = 1, // 左前
+    WHEEL_MOTOR_BR = 2, // 右后
+    WHEEL_MOTOR_BL = 3  // 左后
+} wheel_motor_index_t;
 
 void Chassis_Task(void const *argument);
 

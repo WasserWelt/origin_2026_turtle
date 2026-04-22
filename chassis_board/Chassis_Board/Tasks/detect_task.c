@@ -264,10 +264,11 @@ static void detect_init(uint32_t time)
             {20, 40, 14}, //wheel motor 2
             {20, 40, 14}, //wheel motor 3
             {20, 40, 14}, //wheel motor 4
-            {20, 20, 14}, //steer motor 1
-            {20, 20, 14}, //steer motor 2
-            {20, 20, 14}, //steer motor 3
-            {20, 20, 14}, //steer motor 4
+            // {20, 20, 14}, //steer motor 1  // 已移除，改用全向轮
+            // {20, 20, 14}, //steer motor 2
+            // {20, 20, 14}, //steer motor 3
+            // {20, 20, 14}, //steer motor 4
+            {30, 40, 15}, // BIG_YAW_DM6006
             {30, 40, 15}, // RC
             {30, 40, 15}, // NAV
             {2, 3, 7},     // board gyro

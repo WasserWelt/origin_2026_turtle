@@ -2,7 +2,7 @@
  * @file: Chassis_Power_Limitor.c
  * @author: Shiki
  * @date: 2025.12.19
- * @brief:	起源哨兵2026赛季底盘功率限制模块源文件
+ * @brief: 起源哨兵2026赛季底盘功率限制模块源文件 - 全向轮版本
  *
  功率控制模块工作流程：计算底盘当前预测功率->判断是否超过功率上限->若超过则进行拉格朗日乘子法求解->根据求解结果调整电机目标电流
 *****************************************************************************************************************************/
@@ -10,108 +10,91 @@
 #include "user_common_lib.h"
 #include "detect_task.h"
 #include "main.h"
-/*****************************************************************************************************************************
-/* 功率控制器参数 */
-#define MAX_CMD_CURRENT 16384.0f        // 经过功率控制后的最大控制电流
-#define MIN_CMD_CURRENT -16384.0f       // 经过功率控制后的最小控制电流
-#define LAMBDA_INITIAL_UPEER_BOUND 0.05f // 拉格朗日乘子初始上限
-#define LAMBDA_INITIAL_LOWER_BOUND 0.0f // 拉格朗日乘子初始下限
-#define LAMBDA_UPPER_BOUND_MAX_ITER 10  // 寻找拉格朗日乘子上限时最大迭代次数
-#define LAMBDA_UPPER_BOUND_STEP 10      // 寻找拉格朗日乘子上限时的迭代步长
-#define LAMBDA_MAX_ITER 30              // 二分法寻找lambda时的最大迭代次数
-#define POWER_TOLERANCE 0.8f            // 功率误差容限，单位W
-/*****************************************************************************************************************************/
-// 函数声明
-void Chassis_Power_Control(power_limitor_t *power_limiter, chassis_wheel_motor_t wheel_motor[4], chassis_steer_motor_t steer_motor[4], float P_max, weight_allocate_mode_t weight_allocate_mode, const uint8_t steer_stuck_status[4]);
-static void Lagrange_Solve_Power_Control(power_limitor_t *power_limiter, chassis_wheel_motor_t wheel_motor[4], chassis_steer_motor_t steer_motor[4], float P_max, weight_allocate_mode_t weight_allocate_mode, const uint8_t steer_stuck_status[4]);
-// TODO: 全向轮底盘改为: static void Lagrange_Solve_Power_Control(power_limiter_t *power_limiter, mecanum_motor_t motor[4], float P_max);
-static float Calculate_Initial_Power(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4], const chassis_steer_motor_t steer_motor[4]);
-// TODO: 全向轮底盘改为: static float Calculate_Initial_Power(power_limitor_t *power_limiter, const mecanum_motor_t motor[4]);
-// TODO: 全向轮底盘移除steer_motor功率计算，只保留wheel_motor
-static void Calculate_All_Alpha_Coefficients(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4], const chassis_steer_motor_t steer_motor[4]);
-// TODO: 全向轮底盘改为: static void Calculate_All_Alpha_Coefficients(power_limitor_t *power_limiter, const mecanum_motor_t motor[4]);
-// TODO: 全向轮底盘移除steer_motors.quadratic_coeff/linear_coeff/constant计算
-static void Calculate_Alpha(power_limitor_t *power_limiter, float lambda, const chassis_wheel_motor_t wheel_motor[4], const chassis_steer_motor_t steer_motor[4]);
-// TODO: 全向轮底盘改为: static void Calculate_Alpha(power_limitor_t *power_limiter, float lambda, const mecanum_motor_t motor[4]);
-// TODO: 全向轮底盘移除steer_motors.alpha计算
-static float Calculate_Power_With_Alpha(power_limitor_t *power_limitor);
-// TODO: 全向轮底盘移除steer_motor功率累加，只保留wheel_motor
-static void Allocate_Motor_Weight(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4], const chassis_steer_motor_t steer_motor[4], weight_allocate_mode_t weight_allocate_mode, const uint8_t steer_stuck_status[4]);
-// TODO: 全向轮底盘改为: static void Allocate_Motor_Weight(power_limitor_t *power_limiter, const mecanum_motor_t motor[4], weight_allocate_mode_t weight_allocate_mode);
-// TODO: 全向轮底盘需完全重写权重分配逻辑（移除基于转向角度误差的权重计算和卡舵特殊处理）
 
-float lambda;     // debug用
-int iter;         // debug用
-float power_iter; // debug用
+/* 功率控制器参数 */
+#define MAX_CMD_CURRENT 16384.0f
+#define MIN_CMD_CURRENT -16384.0f
+#define LAMBDA_INITIAL_UPEER_BOUND 0.05f
+#define LAMBDA_INITIAL_LOWER_BOUND 0.0f
+#define LAMBDA_UPPER_BOUND_MAX_ITER 10
+#define LAMBDA_UPPER_BOUND_STEP 10
+#define LAMBDA_MAX_ITER 30
+#define POWER_TOLERANCE 0.8f
+
+/* 全向轮权重配置 */
+typedef struct {
+    float weight_min;
+    float weight_max;
+    float current_gain;
+    float speed_gain;
+} wheel_weight_config_t;
+
+static const wheel_weight_config_t WHEEL_WEIGHT_CONFIG = {
+    1.0f, 10.0f,
+    10.0f / 16384.0f,
+    10.0f / 400.0f
+};
+
+/* 调试变量 */
+float lambda;
+int iter;
+float power_iter;
+
+/* 内部函数声明 */
+static void Lagrange_Solve_Power_Control(power_limitor_t *power_limiter, chassis_wheel_motor_t wheel_motor[4], float P_max);
+static float Calculate_Initial_Power(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4]);
+static void Calculate_All_Alpha_Coefficients(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4]);
+static void Calculate_Alpha(power_limitor_t *power_limiter, float lambda, const chassis_wheel_motor_t wheel_motor[4]);
+static float Calculate_Power_With_Alpha(power_limitor_t *power_limitor);
+static void Allocate_Motor_Weight(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4]);
+
 /**
- * @description:功率控制模块对底盘任务的接口，在chassis_task中调用此函数即可，此函数会将发送给电机的目标电流调整到功率控制后的值
- * @return {*}
- * @param {chassis_wheel_motor_t} wheel_motor 轮电机结构体数组指针
- * @param {chassis_steer_motor_t} steer_motor 舵电机结构体数组指针
- * @param {float} P_max 功率上限
- * TODO: 全向轮底盘需改为传入4个mecanum_motor_t，移除steer_motor相关参数和逻辑
+ * @description: 功率控制接口
+ * @param wheel_motor 轮电机结构体数组指针
+ * @param P_max 功率上限
  */
-void Chassis_Power_Control(power_limitor_t *power_limiter, chassis_wheel_motor_t wheel_motor[4], chassis_steer_motor_t steer_motor[4], float P_max, weight_allocate_mode_t weight_allocate_mode, const uint8_t steer_stuck_status[4])
+void Chassis_Power_Control(power_limitor_t *power_limiter, chassis_wheel_motor_t wheel_motor[4], float P_max)
 {
-    power_limiter->chassis_power_predicted = Calculate_Initial_Power(power_limiter, wheel_motor, steer_motor);
+    power_limiter->chassis_power_predicted = Calculate_Initial_Power(power_limiter, wheel_motor);
 
     if (power_limiter->chassis_power_predicted <= P_max)
-        return; // 预测功率没有达到上限，直接返回
-    else
+        return;
+
+    for (int i = 0; i < 4; i++)
     {
-        // 因为目标函数的变量是电流缩放系数，所以需要避免目标电流控制值为0的情况，matlab实测把0改成1或者-1对功率几乎无影响，这里较保守选择与转速同号，让修改后的功率比原来大
-        for (int i = 0; i < 4; i++)
+        if (wheel_motor[i].give_current == 0)
         {
-            if (wheel_motor[i].give_current == 0)
-            {
-                wheel_motor[i].give_current = (wheel_motor[i].speed_now > 0) ? 1.0f : -1.0f;
-            }
-            // TODO: 全向轮底盘移除steer_motor零电流处理
+            wheel_motor[i].give_current = (wheel_motor[i].speed_now > 0) ? 1.0f : -1.0f;
         }
+    }
 
-        Calculate_All_Alpha_Coefficients(power_limiter, wheel_motor, steer_motor);
-        Lagrange_Solve_Power_Control(power_limiter, wheel_motor, steer_motor, P_max, weight_allocate_mode, steer_stuck_status);
+    Calculate_All_Alpha_Coefficients(power_limiter, wheel_motor);
+    Lagrange_Solve_Power_Control(power_limiter, wheel_motor, P_max);
 
-        // 根据求解结果调整电机目标电流
-        // TODO: 全向轮底盘移除steer_motor电流更新
-        for (int i = 0; i < 4; i++)
-        {
-            wheel_motor[i].give_current = (int16_t)(wheel_motor[i].give_current * power_limiter->wheel_motors.alpha[i]);
-            // TODO: 全向轮底盘删除这行
-            steer_motor[i].give_current = (int16_t)(steer_motor[i].give_current * power_limiter->steer_motors.alpha[i]);
-        }
+    for (int i = 0; i < 4; i++)
+    {
+        wheel_motor[i].give_current = (int16_t)(wheel_motor[i].give_current * power_limiter->wheel_motors.alpha[i]);
     }
 }
 
 /**
- * @description:舵轮功率控制本质是一个带不等式约束的凸二次优化问题，因此可以用拉格朗日乘子法求解，满足KKT条件的解即为全局最优解
- *              此函数具体求解过程:先找到满足功率限制的λ上限和下限，然后在该区间内用二分法寻找合适的λ值，然后用λ解出每个电机的电流缩放倍数alpha，
- *              使得计算出的功率等于功率上限。
- *              如果寻找λ上限时迭代到最大次数依然无法满足功率限制，说明功率限制十分苛刻，每个电机取到让功率最小的控制电流仍然无法满足功率限制，
- *              则直接输出最后一次迭代得到的alpha，并且跳过后续的二分搜索λ。
- * TODO: 全向轮底盘需移除steer_motor参数，修改Allocate_Motor_Weight调用
- * @return {*}
- * @param {chassis_wheel_motor_t} wheel_motor 轮电机结构体数组指针
- * @param {chassis_steer_motor_t} steer_motor 舵电机结构体数组指针
- * @param {float} P_max 功率上限
+ * @description: 拉格朗日乘子法求解功率控制
  */
-static void Lagrange_Solve_Power_Control(power_limitor_t *power_limiter, chassis_wheel_motor_t wheel_motor[4], chassis_steer_motor_t steer_motor[4], float P_max, weight_allocate_mode_t weight_allocate_mode, const uint8_t steer_stuck_status[4])
+static void Lagrange_Solve_Power_Control(power_limitor_t *power_limiter, chassis_wheel_motor_t wheel_motor[4], float P_max)
 {
     float lambda_lower_bound = LAMBDA_INITIAL_LOWER_BOUND;
     float lambda_upper_bound = LAMBDA_INITIAL_UPEER_BOUND;
 
-    // 计算电机权重
-    Allocate_Motor_Weight(power_limiter, wheel_motor, steer_motor, weight_allocate_mode, steer_stuck_status);
-    // 寻找λ的上限,如果初始上限不满足功率约束就顺便调整下限，只要功率约束不是太紧一般初始上限就能满足要求
+    Allocate_Motor_Weight(power_limiter, wheel_motor);
+
     for (int i = 0; i < LAMBDA_UPPER_BOUND_MAX_ITER; i++)
     {
-        Calculate_Alpha(power_limiter, lambda_upper_bound, wheel_motor, steer_motor);
+        Calculate_Alpha(power_limiter, lambda_upper_bound, wheel_motor);
         float power = Calculate_Power_With_Alpha(power_limiter);
         if (power > P_max)
         {
             if (i == LAMBDA_UPPER_BOUND_MAX_ITER - 1)
             {
-                // 说明功率限制过于苛刻，无法找到拉姆达（拉姆达取无穷大也无法满足条件），直接输出当前结果
                 power_limiter->chassis_power_processed = power;
                 power_limiter->final_lambda = lambda_upper_bound;
                 return;
@@ -127,18 +110,18 @@ static void Lagrange_Solve_Power_Control(power_limitor_t *power_limiter, chassis
             break;
         }
     }
-    // 用二分法寻找合适的λ
+
     for (iter = 0; iter < LAMBDA_MAX_ITER; iter++)
     {
         lambda = (lambda_lower_bound + lambda_upper_bound) / 2.0f;
-        Calculate_Alpha(power_limiter, lambda, wheel_motor, steer_motor);
+        Calculate_Alpha(power_limiter, lambda, wheel_motor);
         power_iter = Calculate_Power_With_Alpha(power_limiter);
 
         if (power_iter < P_max && (P_max - power_iter) < POWER_TOLERANCE)
         {
             power_limiter->final_lambda = lambda;
-						power_limiter->iter_num = iter + 1;
-						power_limiter->chassis_power_processed = power_iter;
+            power_limiter->iter_num = iter + 1;
+            power_limiter->chassis_power_processed = power_iter;
             return;
         }
         else if (power_iter > P_max)
@@ -154,76 +137,46 @@ static void Lagrange_Solve_Power_Control(power_limitor_t *power_limiter, chassis
     power_limiter->iter_num = iter + 1;
     power_limiter->chassis_power_processed = power_iter;
 }
+
 /**
- * @description: 计算还未经过功率控制的底盘的预测功率，用于判断是否需要进行功率限制
- * TODO: 全向轮底盘移除steer_motor功率计算，只保留wheel_motor
- * @return {*} 预测的底盘功率值，单位：W
- * @param {chassis_wheel_motor_t} wheel_motor 轮电机结构体数组指针
- * @param {chassis_steer_motor_t} steer_motor 舵电机结构体数组指针
+ * @description: 计算底盘预测功率
  */
-static float Calculate_Initial_Power(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4], const chassis_steer_motor_t steer_motor[4])
+static float Calculate_Initial_Power(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4])
 {
     float initial_total_power = 0;
-    float initial_wheel_power = 0;
-    // TODO: 全向轮底盘删除 initial_steer_power 变量
-    float initial_steer_power = 0;
 
     for (int i = 0; i < 4; i++)
     {
-        initial_wheel_power = power_limiter->wheel_motors.k_p * wheel_motor[i].give_current * wheel_motor[i].speed_now +
-                              power_limiter->wheel_motors.k_w * wheel_motor[i].speed_now * wheel_motor[i].speed_now +
-                              power_limiter->wheel_motors.k_t * wheel_motor[i].give_current * wheel_motor[i].give_current +
-                              power_limiter->wheel_motors.p_static;
+        float initial_wheel_power = power_limiter->wheel_motors.k_p * wheel_motor[i].give_current * wheel_motor[i].speed_now +
+                                  power_limiter->wheel_motors.k_w * wheel_motor[i].speed_now * wheel_motor[i].speed_now +
+                                  power_limiter->wheel_motors.k_t * wheel_motor[i].give_current * wheel_motor[i].give_current +
+                                  power_limiter->wheel_motors.p_static;
 
         if (initial_wheel_power < 0 || toe_is_error(WHEEL_MOTOR_1_TOE + i))
             initial_wheel_power = 0;
 
-        // TODO: 全向轮底盘删除以下 steer_motor 功率计算
-        initial_steer_power = power_limiter->steer_motors.k_p * steer_motor[i].give_current * steer_motor[i].speed_now +
-                              power_limiter->steer_motors.k_w * steer_motor[i].speed_now * steer_motor[i].speed_now +
-                              power_limiter->steer_motors.k_t * steer_motor[i].give_current * steer_motor[i].give_current +
-                              power_limiter->steer_motors.p_static;
-
-        if (initial_steer_power < 0 || toe_is_error(STEER_MOTOR_1_TOE + i))
-            initial_steer_power = 0;
-
-        // TODO: 全向轮底盘改为 initial_total_power += initial_wheel_power;
-        initial_total_power += (initial_wheel_power + initial_steer_power);
+        initial_total_power += initial_wheel_power;
     }
     return initial_total_power;
 }
 
 /**
- * @description: 计算所有电机功率表达式中的α系数（功率表达式见power_model_t定义中的注释）,包括二次项系数，一次项系数和常数项，用于减小计算量
- * TODO: 全向轮底盘移除steer_motors相关计算
- * @return {*}
- * @param {chassis_wheel_motor_t} wheel_motor
- * @param {chassis_steer_motor_t} steer_motor
+ * @description: 计算α系数
  */
-static void Calculate_All_Alpha_Coefficients(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4], const chassis_steer_motor_t steer_motor[4])
+static void Calculate_All_Alpha_Coefficients(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4])
 {
     for (int i = 0; i < 4; i++)
     {
         power_limiter->wheel_motors.quadratic_coeff[i] = power_limiter->wheel_motors.k_t * wheel_motor[i].give_current * wheel_motor[i].give_current;
         power_limiter->wheel_motors.linear_coeff[i] = power_limiter->wheel_motors.k_p * wheel_motor[i].speed_now * wheel_motor[i].give_current;
         power_limiter->wheel_motors.constant[i] = power_limiter->wheel_motors.k_w * wheel_motor[i].speed_now * wheel_motor[i].speed_now + power_limiter->wheel_motors.p_static;
-
-        // TODO: 全向轮底盘删除以下 steer_motors 相关计算
-        power_limiter->steer_motors.quadratic_coeff[i] = power_limiter->steer_motors.k_t * steer_motor[i].give_current * steer_motor[i].give_current;
-        power_limiter->steer_motors.linear_coeff[i] = power_limiter->steer_motors.k_p * steer_motor[i].speed_now * steer_motor[i].give_current;
-        power_limiter->steer_motors.constant[i] = power_limiter->steer_motors.k_w * steer_motor[i].speed_now * steer_motor[i].speed_now + power_limiter->steer_motors.p_static;
     }
 }
 
 /**
- * @description: 计算给定拉格朗日乘子下底盘八个电机的α系数
- * TODO: 全向轮底盘改为计算4个电机，移除steer_motors.alpha计算
- * @return {*}
- * @param {float} lambda
- * @param {chassis_wheel_motor_t} wheel_motor
- * @param {chassis_steer_motor_t} steer_motor
+ * @description: 计算给定λ下轮电机的α系数
  */
-static void Calculate_Alpha(power_limitor_t *power_limiter, float lambda, const chassis_wheel_motor_t wheel_motor[4], const chassis_steer_motor_t steer_motor[4])
+static void Calculate_Alpha(power_limitor_t *power_limiter, float lambda, const chassis_wheel_motor_t wheel_motor[4])
 {
     for (int i = 0; i < 4; i++)
     {
@@ -231,105 +184,41 @@ static void Calculate_Alpha(power_limitor_t *power_limiter, float lambda, const 
                                                          (2.0f * power_limiter->wheel_motors.weight[i] + 2.0f * power_limiter->wheel_motors.quadratic_coeff[i] * lambda),
                                                      MIN_CMD_CURRENT / my_fabsf((float)wheel_motor[i].give_current),
                                                      MAX_CMD_CURRENT / my_fabsf((float)wheel_motor[i].give_current));
-
-        // TODO: 全向轮底盘删除以下 steer_motors.alpha 计算
-        power_limiter->steer_motors.alpha[i] = limit((2.0f * power_limiter->steer_motors.weight[i] - lambda * power_limiter->steer_motors.linear_coeff[i]) /
-                                                         (2.0f * power_limiter->steer_motors.weight[i] + 2.0f * power_limiter->steer_motors.quadratic_coeff[i] * lambda),
-                                                     MIN_CMD_CURRENT / my_fabsf((float)steer_motor[i].give_current),
-                                                     MAX_CMD_CURRENT / my_fabsf((float)steer_motor[i].give_current));
     }
 }
+
 /**
- * @description: 计算给定拉格朗日乘子下底盘八个电机的总功率
- * TODO: 全向轮底盘移除steer_motor功率累加，只保留wheel_motor
- * @return {*} 预测的底盘功率值，单位：W
- * @param {chassis_wheel_motor_t} wheel_motor 轮电机结构体数组指针
- * @param {chassis_steer_motor_t} steer_motor 舵电机结构体数组指针
+ * @description: 计算给定λ下底盘总功率
  */
 static float Calculate_Power_With_Alpha(power_limitor_t *power_limiter)
 {
     float alpha_total_power = 0;
-    float alpha_wheel_power = 0;
-    // TODO: 全向轮底盘删除 alpha_steer_power 变量
-    float alpha_steer_power = 0;
 
     for (int i = 0; i < 4; i++)
     {
-        alpha_wheel_power = power_limiter->wheel_motors.quadratic_coeff[i] * power_limiter->wheel_motors.alpha[i] * power_limiter->wheel_motors.alpha[i] +
+        float alpha_wheel_power = power_limiter->wheel_motors.quadratic_coeff[i] * power_limiter->wheel_motors.alpha[i] * power_limiter->wheel_motors.alpha[i] +
                             power_limiter->wheel_motors.linear_coeff[i] * power_limiter->wheel_motors.alpha[i] +
                             power_limiter->wheel_motors.constant[i];
 
         if (alpha_wheel_power < 0 || toe_is_error(WHEEL_MOTOR_1_TOE + i))
             alpha_wheel_power = 0;
 
-        // TODO: 全向轮底盘删除以下 steer_motor 功率计算
-        alpha_steer_power = power_limiter->steer_motors.quadratic_coeff[i] * power_limiter->steer_motors.alpha[i] * power_limiter->steer_motors.alpha[i] +
-                            power_limiter->steer_motors.linear_coeff[i] * power_limiter->steer_motors.alpha[i] +
-                            power_limiter->steer_motors.constant[i];
-
-        if (alpha_steer_power < 0 || toe_is_error(STEER_MOTOR_1_TOE + i))
-            alpha_steer_power = 0;
-
-        // TODO: 全向轮底盘改为 alpha_total_power += alpha_wheel_power;
-        alpha_total_power += (alpha_wheel_power + alpha_steer_power);
+        alpha_total_power += alpha_wheel_power;
     }
     return alpha_total_power;
 }
 
-// 定义权重配置结构体
-// TODO: 全向轮底盘需重新定义结构体，移除steer相关字段，添加适合全向轮的权重配置项
-typedef struct {
-    float steer_min, steer_max;
-    float wheel_min, wheel_max;
-    float steer_current_gain;
-    float steer_speed_gain;
-    float wheel_angle_error_gain;
-} weight_config_t;
-
-// 预定义各模式的权重配置，将范围和所有增益系数计算一次性写好
-// TODO: 全向轮底盘可删除 PASS_BUMPY_ALLOCATE 中的卡舵相关配置，或重新定义不同策略（如高速/低速模式）
-static const weight_config_t WEIGHT_CONFIGS[] = {
-    [NORMAL_WEIGHT_ALLOCATE] = {
-        1.0f, 10.0f, 0.5f, 5.0f,
-        10.0f / 16384.0f,        // max_weight / 16384.0f
-        10.0f / 400.0f,          // max_weight / 400.0f
-        5.0f / 90.0f             // max_weight / 90.0f
-    },
-    [PASS_BUMPY_ALLOCATE] = {
-        5.0f, 30.0f, 0.1f, 5.0f,
-        2.0f * 30.0f / 16384.0f, // 2.0 * max_weight / 16384.0f
-        0.5f * 30.0f / 400.0f,   // 0.5 * max_weight / 400.0f
-        0.5f * 5.0f / 90.0f      // 0.5 * max_weight / 90.0f
-    }
-};
-
 /**
- * @description: 根据当前电机状态动态分配电机权重
- * TODO: 全向轮底盘需完全重写，移除基于转向角度误差的权重计算和卡舵特殊处理
- * @return {*}
- * @param {chassis_wheel_motor_t} wheel_motor
- * @param {chassis_steer_motor_t} steer_motor
+ * @description: 分配轮电机权重
  */
-static void Allocate_Motor_Weight(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4], const chassis_steer_motor_t steer_motor[4], weight_allocate_mode_t weight_allocate_mode, const uint8_t steer_stuck_status[4])
+static void Allocate_Motor_Weight(power_limitor_t *power_limiter, const chassis_wheel_motor_t wheel_motor[4])
 {
-    // 获取当前模式对应的配置表（默认回退到 NORMAL 模式保护）
-    const weight_config_t *cfg = (weight_allocate_mode == PASS_BUMPY_ALLOCATE) ? 
-                                 &WEIGHT_CONFIGS[PASS_BUMPY_ALLOCATE] : 
-                                 &WEIGHT_CONFIGS[NORMAL_WEIGHT_ALLOCATE];
+    const wheel_weight_config_t *cfg = &WHEEL_WEIGHT_CONFIG;
 
-    // 遍历电机分配权重
     for (int i = 0; i < 4; i++)
     {
-        power_limiter->steer_motors.weight[i] = limit(steer_motor[i].give_current * cfg->steer_current_gain + steer_motor[i].speed_now * cfg->steer_speed_gain, cfg->steer_min, cfg->steer_max);
-
-        float steer_angle_error = my_fabsf(steer_motor[i].angle_set - steer_motor[i].angle_now);
-        power_limiter->wheel_motors.weight[i] = limit((90.0f - steer_angle_error) * cfg->wheel_angle_error_gain, cfg->wheel_min, cfg->wheel_max);
-
-        // --- 过颠簸卡舵特殊权重处理 ---
-        if (weight_allocate_mode == PASS_BUMPY_ALLOCATE && steer_stuck_status != NULL && steer_stuck_status[i] == 1)
-        {
-            power_limiter->steer_motors.weight[i] = cfg->steer_max * 2.0f; 
-            power_limiter->wheel_motors.weight[i] = cfg->wheel_min;        
-        }
+        power_limiter->wheel_motors.weight[i] = limit(
+            wheel_motor[i].give_current * cfg->current_gain + wheel_motor[i].speed_now * cfg->speed_gain,
+            cfg->weight_min, cfg->weight_max);
     }
 }

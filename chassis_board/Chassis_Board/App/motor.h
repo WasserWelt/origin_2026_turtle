@@ -64,19 +64,19 @@ typedef struct // 底盘轮电机结构体 3508
     pid_type_def speed_pid;
 } chassis_wheel_motor_t;
 
-typedef struct // 底盘舵电机结构体 6020
-{
-    int16_t speed_now; // rpm
-    fp32 speed_set;
-    fp32 speed_set_last;
-    fp32 angle_now; // 经过归一化后的舵电机当前位置。单位：度，范围0~180
-    fp32 angle_set;
-    fp32 angle_set_last;
-    int16_t give_current;
-
-    pid_type_def speed_pid;
-    pid_type_def angle_pid;
-} chassis_steer_motor_t;
+// typedef struct // 底盘舵电机结构体 6020
+// {
+//     int16_t speed_now; // rpm
+//     fp32 speed_set;
+//     fp32 speed_set_last;
+//     fp32 angle_now; // 经过归一化后的舵电机当前位置。单位：度，范围0~180
+//     fp32 angle_set;
+//     fp32 angle_set_last;
+//     int16_t give_current;
+//
+//     pid_type_def speed_pid;
+//     pid_type_def angle_pid;
+// } chassis_steer_motor_t;
 
 typedef struct // 云台小yaw轴，pitch轴的6020结构体
 {
@@ -165,19 +165,19 @@ typedef struct
     pid_type_def angle_pid;
 } dial_motor_t;
 /*******************dji电机反馈数据结构体***********************/
-extern motor_measure_t motor_measure_steer[4];  // 底盘舵电机6020
+// extern motor_measure_t motor_measure_steer[4];  // 底盘舵电机6020
 extern motor_measure_t motor_measure_wheel[4];  // 底盘轮电机3508
 extern motor_measure_t motor_measure_small_yaw; // 小yaw电机6020
 extern motor_measure_t motor_measure_pitch;     // pitch 6020
-extern motor_measure_t motor_measure_fric[2];   // 摩擦轮电机3508
-extern LK_motor_measure_t motor_measure_dial;   // 拨弹盘电机
+// extern motor_measure_t motor_measure_fric[2];   // 摩擦轮电机3508
+// extern LK_motor_measure_t motor_measure_dial;   // 拨弹盘电机
 /***********************电机控制结构体***********************************/
-extern chassis_steer_motor_t chassis_steer_motor[4];
+// extern chassis_steer_motor_t chassis_steer_motor[4];
 extern chassis_wheel_motor_t chassis_wheel_motor[4];
 extern gimbal_motor_t gimbal_small_yaw_motor;
 extern gimbal_motor_t gimbal_pitch_motor;
 extern DM_motor_data_t DM_big_yaw_motor; // 达秒电机的反馈值已经包含在DM_motor_data_t中
-extern fric_motor_t fric_motor[2];
-extern dial_motor_t LK_dial_motor;
+// extern fric_motor_t fric_motor[2];
+// extern dial_motor_t LK_dial_motor;
 
 #endif
