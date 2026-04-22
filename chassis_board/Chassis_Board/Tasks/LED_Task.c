@@ -1,5 +1,6 @@
+#include "FreeRTOS.h"
+#include "task.h"
 #include "LED_Task.h"
-
 
 void LED_Task(void const * argument)
 {
@@ -10,8 +11,6 @@ void LED_Task(void const * argument)
 	{
 		HAL_GPIO_TogglePin(GPIOH,GPIO_PIN_10);
 		vTaskDelay(5);
-
-	
 
 	}
 }
