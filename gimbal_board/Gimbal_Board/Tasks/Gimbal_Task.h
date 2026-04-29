@@ -102,8 +102,10 @@
 #define SMALL_YAW_AUTOAIM_ECD_MAX 5561
 #define SMALL_YAW_AUTOAIM_ECD_MIN 4365
 
-#define PITCH_ECD_ANGLE_MAX (4350 * GM6020_ENC_TO_DEGREE) // pitch轴电子限位最大角度，用编码器值标定 1780
-#define PITCH_ECD_ANGLE_MIN (3200 * GM6020_ENC_TO_DEGREE) // pitch轴电子限位最小角度，用编码器值标定 530
+// #define PITCH_ECD_ANGLE_MAX (4350 * GM6020_ENC_TO_DEGREE) // pitch轴电子限位最大角度，用编码器值标定 1780
+// #define PITCH_ECD_ANGLE_MIN (3200 * GM6020_ENC_TO_DEGREE) // pitch轴电子限位最小角度，用编码器值标定 530
+#define PITCH_ECD_ANGLE_MAX (MF6015_ECD_ANGLE_MAX * MF6015_ENC_TO_DEGREE) // pitch轴电子限位最大角度，用编码器值标定
+#define PITCH_ECD_ANGLE_MIN (MF6015_ECD_ANGLE_MIN * MF6015_ENC_TO_DEGREE) // pitch轴电子限位最小角度，用编码器值标定
 
 #define PITCH_NAV_SEEK_ENEMY_ANGLE_MAX 4.0f 
 #define PITCH_NAV_SEEK_ENEMY_ANGLE_MIN -20.0f 
@@ -117,6 +119,30 @@
 
 #define REMOTE_CONTROL_YAW_MAX_SPEED 5.0f  //rad/s
 #define REMOTE_CONTROL_PITCH_MAX_SPEED 5.0f  //rad/s
+
+// ============== 大Pitch DM4340 PID参数 ==============
+#define BIG_PITCH_SPEED_KP        0.1f
+#define BIG_PITCH_SPEED_KI        0.0001f
+#define BIG_PITCH_SPEED_KD        0.0f
+#define BIG_PITCH_SPEED_MAX_OUT   10.0f
+#define BIG_PITCH_SPEED_MAX_IOUT  0.1f
+
+#define BIG_PITCH_ANGLE_KP        20.0f
+#define BIG_PITCH_ANGLE_KI        0.0f
+#define BIG_PITCH_ANGLE_KD        10.0f
+#define BIG_PITCH_ANGLE_MAX_OUT   150.0f
+#define BIG_PITCH_ANGLE_MAX_IOUT  0.0f
+
+#define BIG_PITCH_ANGLE_MAX       30.0f   // 展开最大角度(度)
+#define BIG_PITCH_ANGLE_MIN     -60.0f   // 折叠最大角度(度)
+
+// ============== 小Pitch MF6015 编码器配置 ==============
+#define MF6015_ENC_RESOLUTION     65535   // 16位编码器，满量程
+#define MF6015_ENC_TO_DEGREE     (360.0f / MF6015_ENC_RESOLUTION)  // 编码器角度转度数系数
+
+// 跳变阈值：编码器零点附近和量程边界的跳变处理边界（电机实际编码器，非角度值）
+#define MF6015_ECD_ANGLE_MAX     60000   // 编码器上限阈值
+#define MF6015_ECD_ANGLE_MIN     5000    // 编码器下限阈值
 
 void Gimbal_Task(void const *argument);
 

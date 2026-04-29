@@ -4,25 +4,25 @@ overview: 审核修正终版：新增大Pitch(DM4340)控制和替换小Pitch为M
 todos:
   - id: motor-h
     content: "motor.h: 修改motor_measure_pitch类型 + 添加DM_big_pitch_motor extern"
-    status: pending
+    status: completed
   - id: motor-c
     content: "motor.c: 修改motor_measure_pitch实例化类型 + 添加DM_big_pitch_motor实例"
-    status: pending
+    status: completed
   - id: can-gimbal-h
     content: "bsp_can_gimbal.h: 添加CAN ID宏 + 枚举扩展 + 函数声明"
-    status: pending
+    status: completed
   - id: can-gimbal-c
     content: "bsp_can_gimbal.c: 队列宏/消息实例 + Can_Msg_Init + CAN1/CAN2回调 + Allocate_Can_Msg分支 + 4个新函数"
-    status: pending
+    status: completed
   - id: gimbal-task
     content: "Gimbal_Task.c: 新增extern/PID宏/初始化/数据更新/使能检查/电机控制/安全处理/CAN发送"
-    status: pending
+    status: completed
   - id: detect-h
     content: "detect_task.h: 枚举末尾追加两个TOE"
-    status: pending
+    status: completed
   - id: detect-c
     content: "detect_task.c: set_item数组追加两项"
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -229,12 +229,12 @@ case CAN_SMALL_PITCH_CMD:
 {
     // MF6015 LK协议：DATA[0]=命令字节 0xA1（位置模式），DATA[4]/DATA[5]=转矩电流 iqControl
     int16_t iq = data1;
-    small_pitch_send_msg.data[0] = 0xA1;                    // 命令字节：0xA1=位置模式
+    small_pitch_send_msg.data[0] = 0xA1;
     small_pitch_send_msg.data[1] = 0x00;
     small_pitch_send_msg.data[2] = 0x00;
     small_pitch_send_msg.data[3] = 0x00;
-    small_pitch_send_msg.data[4] = (uint8_t)(iq & 0xFF);          // iqControl 低字节
-    small_pitch_send_msg.data[5] = (uint8_t)((iq >> 8) & 0xFF);    // iqControl 高字节
+    small_pitch_send_msg.data[4] = (uint8_t)(iq & 0xFF);
+    small_pitch_send_msg.data[5] = (uint8_t)((iq >> 8) & 0xFF);
     small_pitch_send_msg.data[6] = 0x00;
     small_pitch_send_msg.data[7] = 0x00;
     xQueueSend(SMALL_PITCH_SEND_QUEUE, &small_pitch_send_msg, 0);

@@ -21,7 +21,12 @@
 #define DIAL_RecID 0x141             // CAN2
 
 #define SMALL_YAW_GM6020_RecID 0x205 // CAN1
-#define PITCH_GM6020_RecID 0x206     // CAN1
+// 大Pitch (DM4340) - CAN1, MIT协议
+#define BIG_PITCH_DM4340_RecID 0x301  // 接收ID (CAN1)
+#define BIG_PITCH_DM4340_CMD    0x02   // 发送ID (CAN1)
+// 小Pitch (MF6015) - CAN2, LK协议，替换原PITCH_GM6020(0x206, CAN1)
+#define SMALL_PITCH_MF6015_RecID 0x142  // 接收ID (CAN2)
+#define SMALL_PITCH_MF6015_CMD   0x142  // 发送ID (CAN2)
 #define FRIC1_M3508_RecID 0x201      // CAN1
 #define FRIC2_M3508_RecID 0x202      // CAN1
 /*********************************CAN发送ID*******************************************/
@@ -50,7 +55,9 @@ typedef enum
     CAN_BIG_YAW_CMD,
     CAN_SMALL_YAW_AND_PITCH_CMD,
     CAN_FRIC_CMD,
-    CAN_DIAL_CMD
+    CAN_DIAL_CMD,
+    CAN_BIG_PITCH_CMD,   // 新增：大Pitch MIT发送
+    CAN_SMALL_PITCH_CMD  // 新增：小Pitch LK发送
 } CAN_CMD_ID; // CAN发送命令类型,用于把不同的can消息送入对应消息队列统一发送
 
 typedef struct
@@ -67,7 +74,9 @@ void Can_Msg_Init(void);
 void Create_Can_Send_Queues(void);
 void Allocate_Can_Msg(int16_t data1, int16_t data2, int16_t data3, int16_t data4, CAN_CMD_ID can_cmd_id);
 void Ctrl_DM_Motor(float _pos, float _vel, float _KP, float _KD, float _torq);
+void Ctrl_DM_BigPitch(float _pos, float _vel, float _KP, float _KD, float _torq);
 void enable_DM(uint8_t id, uint8_t ctrl_mode);
+void enable_DM_BigPitch(void);
 void disable_DM(uint8_t id, uint8_t ctrl_mode);
 
 #endif

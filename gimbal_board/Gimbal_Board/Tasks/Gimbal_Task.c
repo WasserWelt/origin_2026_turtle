@@ -96,12 +96,17 @@ gimbal_handler gimbal_commands[] = {
     [NAV_SEEK_ENEMY] = gimbal_nav_seek_enemy_handler,
     [GIMBAL_SAFE] = gimbal_safe_handler};
 
+static void Big_Pitch_Motor_Control(void);
+
+// 大Pitch状态标志：0=折叠, 1=展开
+static uint8_t big_pitch_up_flag = 0;
+
 // 其余函数声明
 static void Gimbal_Motor_Control_Init(void);
 static void Gimbal_Data_Update(void);
 static gimbal_mode_t Gimbal_Mode_Update(void);
 static float Find_Yaw_Min_Angle(float target, float current);
-static void Check_Big_Yaw_DM_Auto_Enable();
+static void Check_DM_Auto_Enable();
 static bool_t Check_Big_Yaw_LostTarget_Wait(gimbal_mode_t last_mode);
 static fp32 Set_Big_Yaw_Seek_Enemy_Angle();
 static fp32 Set_Small_Yaw_Seek_Enemy_Angle();
@@ -132,6 +137,9 @@ static void Gimbal_Motor_Control_Init(void)
     const static fp32 pitch_motor_angle_pid[3] = {PITCH_MOTOR_ANGLE_PID_KP, PITCH_MOTOR_ANGLE_PID_KI, PITCH_MOTOR_ANGLE_PID_KD};
     const static fp32 pitch_motor_auto_aim_pid[3] = {PITCH_MOTOR_AUTO_AIM_PID_KP, PITCH_MOTOR_AUTO_AIM_PID_KI, PITCH_MOTOR_AUTO_AIM_PID_KD};
 
+    const static fp32 big_pitch_speed_pid[3] = {BIG_PITCH_SPEED_KP, BIG_PITCH_SPEED_KI, BIG_PITCH_SPEED_KD};
+    const static fp32 big_pitch_nav_angle_pid[3] = {BIG_PITCH_ANGLE_KP, BIG_PITCH_ANGLE_KI, BIG_PITCH_ANGLE_KD};
+
     PID_init(&DM_big_yaw_motor.speed_pid, PID_POSITION, big_yaw_motor_speed_pid, BIG_YAW_MOTOR_SPEED_PID_MAX_OUT, BIG_YAW_MOTOR_SPEED_PID_MAX_IOUT);
     PID_init(&DM_big_yaw_motor.nav_angle_pid, PID_POSITION, big_yaw_motor_nav_angle_pid, BIG_YAW_MOTOR_NAV_ANGLE_PID_MAX_OUT, BIG_YAW_MOTOR_NAV_ANGLE_PID_MAX_IOUT);
     PID_init(&DM_big_yaw_motor.follow_small_yaw_pid, PID_POSITION, big_yaw_motor_follow_small_yaw_pid, BIG_YAW_MOTOR_FOLLOW_SMALL_YAW_PID_MAX_OUT, BIG_YAW_MOTOR_FOLLOW_SMALL_YAW_PID_MAX_IOUT);
@@ -151,6 +159,13 @@ static void Gimbal_Motor_Control_Init(void)
     PID_init(&gimbal_pitch_motor.auto_aim_pid, PID_POSITION, pitch_motor_auto_aim_pid, PITCH_MOTOR_AUTO_AIM_PID_MAX_OUT, PITCH_MOTOR_AUTO_AIM_PID_MAX_IOUT);
     gimbal_pitch_motor.speed_ff = PITCH_MOTOR_SPEED_FF;
     gimbal_pitch_motor.current_ff = PITCH_MOTOR_CURRENT_FF;
+
+    PID_init(&DM_big_pitch_motor.speed_pid, PID_POSITION,
+             big_pitch_speed_pid,
+             BIG_PITCH_SPEED_MAX_OUT, BIG_PITCH_SPEED_MAX_IOUT);
+    PID_init(&DM_big_pitch_motor.nav_angle_pid, PID_POSITION,
+             big_pitch_nav_angle_pid,
+             BIG_PITCH_ANGLE_MAX_OUT, BIG_PITCH_ANGLE_MAX_IOUT);
 }
 
 /**
@@ -188,15 +203,28 @@ static void Gimbal_Data_Update(void)
     gimbal_pitch_motor.INS_speed_now = -INS.Gyro[AXIS_Y] * RAD_TO_DEGREE; // 单位度每秒
     gimbal_pitch_motor.INS_angle_now = -INS.Pitch;
 
-    // 处理pitch电机位置编码器值的跳变问题
-    if (PITCH_ECD_ANGLE_MAX < 1300 * GM6020_ENC_TO_DEGREE && motor_measure_pitch.ecd > 6800 * GM6020_ENC_TO_DEGREE)
-        gimbal_pitch_motor.ENC_angle_now = (motor_measure_pitch.ecd - 8192) * GM6020_ENC_TO_DEGREE;
-    else if (PITCH_ECD_ANGLE_MIN > 6800 * GM6020_ENC_TO_DEGREE && motor_measure_pitch.ecd < 1300 * GM6020_ENC_TO_DEGREE)
-        gimbal_pitch_motor.ENC_angle_now = (motor_measure_pitch.ecd + 8192) * GM6020_ENC_TO_DEGREE;
+    // 处理小Pitch电机位置编码器值的跳变问题（MF6015, 16位, 0-65535）
+    if (motor_measure_pitch.ecd > MF6015_ECD_ANGLE_MAX)
+        gimbal_pitch_motor.ENC_angle_now = (motor_measure_pitch.ecd - MF6015_ENC_RESOLUTION) * MF6015_ENC_TO_DEGREE;
+    else if (motor_measure_pitch.ecd < MF6015_ECD_ANGLE_MIN)
+        gimbal_pitch_motor.ENC_angle_now = (motor_measure_pitch.ecd + MF6015_ENC_RESOLUTION) * MF6015_ENC_TO_DEGREE;
     else
-        gimbal_pitch_motor.ENC_angle_now = motor_measure_pitch.ecd * GM6020_ENC_TO_DEGREE;
+        gimbal_pitch_motor.ENC_angle_now = motor_measure_pitch.ecd * MF6015_ENC_TO_DEGREE;
+
+    // 大Pitch DM4340数据转换（将原始MIT数据转换为弧度/速度单位）
+    DM_big_pitch_motor.INS_angle_now = DM_big_pitch_motor.pos * RAD_TO_DEGREE;
+    DM_big_pitch_motor.INS_speed_now = DM_big_pitch_motor.vel * RAD_TO_DEGREE;
 
     gimbal_control.gimbal_mode_last = gimbal_control.gimbal_mode;
+
+    // 
+    // Q键侧边触发：切换大Pitch折叠/展开状态
+    static uint8_t last_key_q = 0;
+    if ((rc_ctrl.key.v & KEY_PRESSED_OFFSET_Q) && !last_key_q)
+    {
+        big_pitch_up_flag = big_pitch_up_flag ? 0 : 1;
+    }
+    last_key_q = (rc_ctrl.key.v & KEY_PRESSED_OFFSET_Q) ? 1 : 0;
 }
 
 /**
@@ -255,7 +283,7 @@ static float Find_Yaw_Min_Angle(float target, float current) // 只有yaw轴需要，p
  * @description: 检查大yaw电机是否处于失能状态，如果是，那么使能大yaw轴达妙电机
  * @return {*}
  */
-static void Check_Big_Yaw_DM_Auto_Enable()
+static void Check_DM_Auto_Enable()
 {
     if (!DM_big_yaw_motor.state)
     {
@@ -263,6 +291,16 @@ static void Check_Big_Yaw_DM_Auto_Enable()
         while (enable_send_count > 0)
         {
             enable_DM(BIG_YAW_DM6006_TransID, MIT);
+            vTaskDelay(1);
+            enable_send_count--;
+        }
+    }
+    if (!DM_big_pitch_motor.state)  // 大Pitch自动使能
+    {
+        uint8_t enable_send_count = 5;
+        while (enable_send_count > 0)
+        {
+            enable_DM_BigPitch();
             vTaskDelay(1);
             enable_send_count--;
         }
@@ -484,6 +522,33 @@ static void Calculate_Gimbal_Motor_Target_Current(pid_type_def *gimbal_motor_pid
     }
 }
 /**
+ * @description: 大Pitch电机控制函数（DM4340），独立控制不依赖云台模式
+ * @return 无
+ */
+static void Big_Pitch_Motor_Control(void)
+{
+    if (gimbal_control.gimbal_mode == GIMBAL_SAFE)
+    {
+        DM_big_pitch_motor.target_current = 0;
+        return;
+    }
+
+    fp32 target_angle = (big_pitch_up_flag == 1) ? BIG_PITCH_ANGLE_MAX : BIG_PITCH_ANGLE_MIN;
+
+    // 角度环（复用 nav_angle_pid 作为角度环）
+    PID_calc(&DM_big_pitch_motor.nav_angle_pid,
+             DM_big_pitch_motor.INS_angle_now,
+             target_angle);
+
+    // 速度环（输出作为力矩）
+    PID_calc(&DM_big_pitch_motor.speed_pid,
+             DM_big_pitch_motor.INS_speed_now,
+             DM_big_pitch_motor.nav_angle_pid.out);
+
+    DM_big_pitch_motor.target_current = DM_big_pitch_motor.speed_pid.out;
+}
+
+/**
  * @description: 失能模式下的控制函数，直接对云台电机电流置零,同时清零pid的iout
  * @return 无
  */
@@ -491,6 +556,7 @@ static void gimbal_safe_handler(void)
 {
     gimbal_small_yaw_motor.give_current = 0;
     DM_big_yaw_motor.target_current = 0;
+    DM_big_pitch_motor.target_current = 0;
     gimbal_pitch_motor.give_current = 0;
 
     PID_clear(&gimbal_small_yaw_motor.speed_pid);
@@ -502,6 +568,9 @@ static void gimbal_safe_handler(void)
     PID_clear(&DM_big_yaw_motor.follow_small_yaw_pid);
     PID_clear(&DM_big_yaw_motor.auto_aim_pid);
     PID_clear(&DM_big_yaw_motor.omni_pid);
+
+    PID_clear(&DM_big_pitch_motor.speed_pid);
+    PID_clear(&DM_big_pitch_motor.nav_angle_pid);
 
     PID_clear(&gimbal_pitch_motor.speed_pid);
     PID_clear(&gimbal_pitch_motor.angle_pid);
@@ -743,17 +812,23 @@ void Gimbal_Task(void const *argument)
     {
         static uint8_t cnt = 1;
 
-        Check_Big_Yaw_DM_Auto_Enable();
+        Check_DM_Auto_Enable(); // 包含大yaw DM和大Pitch DM自动使能，均在CAN1
+
         Gimbal_Data_Update();
         gimbal_control.gimbal_mode = Gimbal_Mode_Update();
+
         Call_Gimbal_Mode_Handler(gimbal_control.gimbal_mode);
+        Big_Pitch_Motor_Control();  // 大Pitch电机控制
 
 //             Ctrl_DM_Motor(0, 0, 0, 0, 0);
        Ctrl_DM_Motor(0, 0, 0, 0, DM_big_yaw_motor.target_current);
+       Ctrl_DM_BigPitch(0.0f, 0.0f, 0.0f, 0.0f, DM_big_pitch_motor.target_current);
 
-        Allocate_Can_Msg(gimbal_small_yaw_motor.give_current, gimbal_pitch_motor.give_current, 0, 0, CAN_SMALL_YAW_AND_PITCH_CMD);
-//	    Allocate_Can_Msg(500, gimbal_pitch_motor.give_current, 0, 0, CAN_SMALL_YAW_AND_PITCH_CMD);
-        //		Allocate_Can_Msg(0, 0, 0, 0, CAN_SMALL_YAW_AND_PITCH_CMD);
+        // Small Yaw: CAN1, DJI协议，原有发送不变
+        Allocate_Can_Msg(gimbal_small_yaw_motor.give_current, 0, 0, 0, CAN_SMALL_YAW_AND_PITCH_CMD);
+        // Small Pitch: CAN2, LK协议，单独发送
+        Allocate_Can_Msg(LK_MOTOR_TORQUE_CONTROL_CMD_ID, 0, gimbal_small_yaw_motor.give_current, 0, CAN_SMALL_PITCH_CMD);
+        // Allocate_Can_Msg(0, 0, 0, 0, CAN_SMALL_YAW_AND_PITCH_CMD);
 
         //  Vofa_Send_Data4(gimbal_pitch_motor.give_current,motor_measure_pitch.given_current,gimbal_pitch_motor.INS_speed_set,gimbal_pitch_motor.INS_speed_now );
 

@@ -276,6 +276,8 @@ static void detect_init(uint32_t time)
             {7, 3, 7},     // board gyro
             {7, 5, 7},     // board accel
             {50, 50, 14},     // NUC下发数据
+            {5, 40, 10},   // BIG_PITCH_DM4340
+            {5, 40, 10},   // SMALL_PITCH_MF6015
         };
 
     for (uint8_t i = 0; i < ERROR_LIST_LENGHT; i++)

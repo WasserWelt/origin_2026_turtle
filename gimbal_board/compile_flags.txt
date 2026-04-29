@@ -1,7 +1,4 @@
--target arm-none-eabi
--mcpu=cortex-m4
--mfloat-abi=softfp
--mfpu=fpv4-sp-d16
+
 -mthumb
 -g
 -O1
