@@ -149,7 +149,6 @@ fp32 mag_scale_factor[3][3] = {IST8310_BOARD_INSTALL_SPIN_MATRIX};
 fp32 mag_offset[3];
 fp32 mag_cali_offset[3];
 
-static uint8_t first_temperate;
 static const fp32 imu_temp_pid[3] = {TEMPERATURE_PID_KP, TEMPERATURE_PID_KI, TEMPERATURE_PID_KD};
 
 static const float timing_time = 0.001f;   //tast run time , unit s.任务运行的时间 单位 s

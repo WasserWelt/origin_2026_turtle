@@ -1,4 +1,5 @@
 #include "bsp_DMIMU.h"
+#include "string.h"
 #include "user_common_lib.h"
 // ========================== ≥ı ºªØimu ==========================
 imu_t imu;
@@ -44,17 +45,17 @@ void imu_read_reg(uint8_t reg_id)
 	imu_send_cmd(reg_id, CMD_READ, 0);
 }
 
-void imu_reboot()
+void imu_reboot(void)
 {
 	imu_write_reg(REBOOT_IMU, 0);
 }
 
-void imu_accel_calibration()
+void imu_accel_calibration(void)
 {
 	imu_write_reg(ACCEL_CALI, 0);
 }
 
-void imu_gyro_calibration()
+void imu_gyro_calibration(void)
 {
 	imu_write_reg(GYRO_CALI, 0);
 }
@@ -69,12 +70,12 @@ void imu_set_active_mode_delay(uint32_t delay)
 	imu_write_reg(SET_DELAY, delay);
 }
 
-void imu_change_to_active()
+void imu_change_to_active(void)
 {
 	imu_write_reg(CHANGE_ACTIVE, 1);
 }
 
-void imu_change_to_request()
+void imu_change_to_request(void)
 {
 	imu_write_reg(CHANGE_ACTIVE, 0);
 }
@@ -94,32 +95,32 @@ void imu_set_mst_id(uint8_t mst_id)
 	imu_write_reg(SET_MST_ID, mst_id);
 }
 
-void imu_save_parameters()
+void imu_save_parameters(void)
 {
 	imu_write_reg(SAVE_PARAM, 0);
 }
 
-void imu_restore_settings()
+void imu_restore_settings(void)
 {
 	imu_write_reg(RESTORE_SETTING, 0);
 }
 
-void imu_request_accel()
+void imu_request_accel(void)
 {
 	imu_read_reg(ACCEL_DATA);
 }
 
-void imu_request_gyro()
+void imu_request_gyro(void)
 {
 	imu_read_reg(GYRO_DATA);
 }
 
-void imu_request_euler()
+void imu_request_euler(void)
 {
 	imu_read_reg(EULER_DATA);
 }
 
-void imu_request_quat()
+void imu_request_quat(void)
 {
 	imu_read_reg(QUAT_DATA);
 }

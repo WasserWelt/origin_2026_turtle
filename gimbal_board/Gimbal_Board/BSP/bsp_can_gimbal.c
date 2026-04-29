@@ -249,7 +249,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             DM_big_yaw_motor.p_int = (rx_data[1] << 8) | rx_data[2];
             DM_big_yaw_motor.v_int = (rx_data[3] << 4) | (rx_data[4] >> 4);
             DM_big_yaw_motor.t_int = ((rx_data[4] & 0xF) << 8) | rx_data[5];
-            DM_big_yaw_motor.pos = uint_to_float(DM_big_yaw_motor.p_int, P_MIN, P_MAX, 16) * 57.3248408;
+            DM_big_yaw_motor.pos = uint_to_float(DM_big_yaw_motor.p_int, P_MIN, P_MAX, 16) * 57.3248408f;
             DM_big_yaw_motor.vel = uint_to_float(DM_big_yaw_motor.v_int, V_MIN, V_MAX, 12);
             DM_big_yaw_motor.toq = uint_to_float(DM_big_yaw_motor.t_int, T_MIN, T_MAX, 12);
             DM_big_yaw_motor.Tmos = (float)(rx_data[6]);

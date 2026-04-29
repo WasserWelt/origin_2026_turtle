@@ -106,10 +106,10 @@ static void Gimbal_Motor_Control_Init(void);
 static void Gimbal_Data_Update(void);
 static gimbal_mode_t Gimbal_Mode_Update(void);
 static float Find_Yaw_Min_Angle(float target, float current);
-static void Check_DM_Auto_Enable();
+static void Check_DM_Auto_Enable(void);
 static bool_t Check_Big_Yaw_LostTarget_Wait(gimbal_mode_t last_mode);
-static fp32 Set_Big_Yaw_Seek_Enemy_Angle();
-static fp32 Set_Small_Yaw_Seek_Enemy_Angle();
+static fp32 Set_Big_Yaw_Seek_Enemy_Angle(void);
+static fp32 Set_Small_Yaw_Seek_Enemy_Angle(void);
 static fp32 Pitch_Gravity_Compensation(float pitch_angle_now);
 void Check_Pitch_Angle_Limit(gimbal_motor_control_mode_t mode);
 static float Set_Pitch_Seek_Enemy_Angle(void);
@@ -283,7 +283,7 @@ static float Find_Yaw_Min_Angle(float target, float current) // 只有yaw轴需要，p
  * @description: 检查大yaw电机是否处于失能状态，如果是，那么使能大yaw轴达妙电机
  * @return {*}
  */
-static void Check_DM_Auto_Enable()
+static void Check_DM_Auto_Enable(void)
 {
     if (!DM_big_yaw_motor.state)
     {
@@ -338,7 +338,7 @@ static bool_t Check_Big_Yaw_LostTarget_Wait(gimbal_mode_t last_mode)
  * @description: 用于计算导航索敌模式下大yaw轴旋转巡航的目标角度,每隔两秒往一个方向转九十度
  * @return {*}
  */
-static fp32 Set_Big_Yaw_Seek_Enemy_Angle()
+static fp32 Set_Big_Yaw_Seek_Enemy_Angle(void)
 {
     static uint32_t seek_wait_start = 0;
     static volatile uint8_t seek_wait_flag = 0;
@@ -362,7 +362,7 @@ static fp32 Set_Big_Yaw_Seek_Enemy_Angle()
  * @description: 用于计算导航索敌模式下小yaw轴左右摆动巡航的目标角度
  * @return {*}
  */
-static fp32 Set_Small_Yaw_Seek_Enemy_Angle()
+static fp32 Set_Small_Yaw_Seek_Enemy_Angle(void)
 {
     static float auto_small_yaw_watch = SMALL_YAW_MIDDLE_ENC_ZERO * GM6020_ENC_TO_DEGREE;
     static uint8_t swing_switch_flag = 0;
