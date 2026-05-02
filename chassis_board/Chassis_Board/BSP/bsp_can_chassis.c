@@ -76,15 +76,26 @@ void Can_Filter_Init(void)
     HAL_CAN_Start(&hcan1);
     HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
 
-    // CAN2配置为接收：大yaw、云台到下板数据、4个轮电机3508
+    // CAN2过滤器分两个bank：
+    // Bank 14: 4个轮电机3508 + CAP
+    // Bank 15: 功率计 + 2个备用槽位
     can_filter.FilterActivation = ENABLE;
     can_filter.FilterMode = CAN_FILTERMODE_IDLIST;
     can_filter.FilterScale = CAN_FILTERSCALE_16BIT;
-    can_filter.FilterIdHigh = (GIMBAL_TO_CHASSIS_FIRST_RecID << 5);
-    can_filter.FilterIdLow = (GIMBAL_TO_CHASSIS_SECOND_RecID << 5);
-    can_filter.FilterMaskIdHigh = (WHEEL1_M3508_RecID << 5);
-    can_filter.FilterMaskIdLow = (BIG_YAW_DM6006_RecID << 5);
+    // 16位IDLIST模式：FilterIdHigh/FilterIdLow/FilterMaskIdHigh/FilterMaskIdLow 各放1个16位ID
+    can_filter.FilterIdHigh = (WHEEL1_M3508_RecID << 5);   // 0x201
+    can_filter.FilterIdLow = (WHEEL2_M3508_RecID << 5);   // 0x202
+    can_filter.FilterMaskIdHigh = (WHEEL3_M3508_RecID << 5); // 0x203
+    can_filter.FilterMaskIdLow = (WHEEL4_M3508_RecID << 5);  // 0x204
     can_filter.FilterBank = 14;
+    can_filter.FilterFIFOAssignment = CAN_RX_FIFO0;
+    HAL_CAN_ConfigFilter(&hcan2, &can_filter);
+
+    can_filter.FilterIdHigh = (CAP_RecID << 5);            // 0x130
+    can_filter.FilterIdLow = (POWER_METER_RecID << 5);     // 0x123
+    can_filter.FilterMaskIdHigh = 0x0000;                  // 备用槽位1（填0避免误收）
+    can_filter.FilterMaskIdLow = 0x0000;                    // 备用槽位2（填0避免误收）
+    can_filter.FilterBank = 15;
     can_filter.FilterFIFOAssignment = CAN_RX_FIFO0;
     HAL_CAN_ConfigFilter(&hcan2, &can_filter);
     HAL_CAN_Start(&hcan2);
@@ -184,7 +195,6 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     if (hcan == &hcan1)
     {
         HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data);
-        // CAN1保留大yaw接收 // 下板只需要DM6006的位置数据完成底盘跟随云台
         switch (rx_header.StdId)
         {
         case BIG_YAW_DM6006_RecID:
@@ -194,6 +204,34 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             DM_big_yaw_motor.p_int = (rx_data[1] << 8) | rx_data[2];
             break;
         }
+        case GIMBAL_TO_CHASSIS_FIRST_RecID:
+        {
+            uint8_t rc_connected;
+            chassis_rc_ctrl.s[1] = rx_data[0];
+            rc_connected = rx_data[1];
+            chassis_rc_ctrl.ch[2] = (rx_data[2] << 8) | rx_data[3];
+            chassis_rc_ctrl.ch[3] = (rx_data[4] << 8) | rx_data[5];
+            chassis_rc_ctrl.ch[4] = (rx_data[6] << 8) | rx_data[7];
+            if (rc_connected)
+                detect_hook(RC_TOE);
+            break;
+        }
+        case GIMBAL_TO_CHASSIS_SECOND_RecID:
+        {
+            int nav_vx_int = (rx_data[1] << 8) | rx_data[0];
+            int nav_vy_int = (rx_data[3] << 8) | rx_data[2];
+            nav_ctrl.vx = uint_to_float(nav_vx_int, NAV_MIN_SPEED, NAV_MAX_SPEED, 12);
+            nav_ctrl.vy = uint_to_float(nav_vy_int, NAV_MIN_SPEED, NAV_MAX_SPEED, 12);
+            nav_ctrl.chassis_target_mode = rx_data[4] & 0x03; // chassis_target_mode对应rx_data[4]最低两位,下面的flag以此类推
+            nav_ctrl.updownhill_state = (rx_data[4] >> 2) & 0x03;
+            nav_ctrl.health_state = (rx_data[4] >> 4) & 0x01;
+            nav_ctrl.buffer_energy_remain = ((rx_data[5] & 0x07) << 3) | (rx_data[4] >> 5);
+            nav_ctrl.referee_power_limit = ((rx_data[6] & 0x07) << 5) | (rx_data[5] >> 3);
+            nav_ctrl.game_start = (rx_data[6] >> 3) & 0x01;
+            detect_hook(NAV_TOE);
+            break;
+        }
+
         }
     }
     if (hcan == &hcan2)
@@ -210,39 +248,6 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             uint8_t i = rx_header.StdId - WHEEL1_M3508_RecID;
             get_motor_measure(&motor_measure_wheel[i], rx_data);
             detect_hook(WHEEL_MOTOR_1_TOE + i);
-            break;
-        }
-
-
-        case GIMBAL_TO_CHASSIS_FIRST_RecID:
-        {
-            uint8_t rc_connected;
-            chassis_rc_ctrl.s[1] = rx_data[0];
-            rc_connected = rx_data[1];
-            chassis_rc_ctrl.ch[2] = (rx_data[2] << 8) | rx_data[3];
-            chassis_rc_ctrl.ch[3] = (rx_data[4] << 8) | rx_data[5];
-            chassis_rc_ctrl.ch[4] = (rx_data[6] << 8) | rx_data[7];
-
-            if (rc_connected)
-                detect_hook(RC_TOE);
-
-            break;
-        }
-        case GIMBAL_TO_CHASSIS_SECOND_RecID:
-        {
-            int nav_vx_int = (rx_data[1] << 8) | rx_data[0];
-            int nav_vy_int = (rx_data[3] << 8) | rx_data[2];
-
-            nav_ctrl.vx = uint_to_float(nav_vx_int,NAV_MIN_SPEED,NAV_MAX_SPEED,12);
-            nav_ctrl.vy = uint_to_float(nav_vy_int, NAV_MIN_SPEED, NAV_MAX_SPEED, 12);
-            nav_ctrl.chassis_target_mode = rx_data[4] & 0x03; // chassis_target_mode对应rx_data[4]最低两位,下面的flag以此类推
-            nav_ctrl.updownhill_state = (rx_data[4] >> 2) & 0x03;
-            nav_ctrl.health_state = (rx_data[4] >> 4) & 0x01;
-            nav_ctrl.buffer_energy_remain = ((rx_data[5] & 0x07) << 3) | (rx_data[4] >> 5);
-            nav_ctrl.referee_power_limit = ((rx_data[6] & 0x07) << 5) | (rx_data[5] >> 3);
-            nav_ctrl.game_start = (rx_data[6] >> 3) & 0x01;
-
-            detect_hook(NAV_TOE);
             break;
         }
         case CAP_RecID:
@@ -321,5 +326,5 @@ void CAN_cmd_power_meter(int16_t yaw, int16_t pitch, int16_t shoot, int16_t rev)
     gimbal_can_send_data[5] = shoot;
     gimbal_can_send_data[6] = (rev >> 8);
     gimbal_can_send_data[7] = rev;
-    HAL_CAN_AddTxMessage(&hcan1, &gimbal_tx_message, gimbal_can_send_data, &send_mail_box);
+    HAL_CAN_AddTxMessage(&hcan2, &gimbal_tx_message, gimbal_can_send_data, &send_mail_box);
 }

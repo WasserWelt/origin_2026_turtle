@@ -16,29 +16,29 @@
 #include "pid.h"
 
 /*********************************CAN接收ID*******************************************/
-#define BIG_YAW_DM6006_RecID 0x300 // CAN2
+#define BIG_YAW_DM6006_RecID 0x300 // CAN1, 来自底盘板转发的大Yaw电机位置(0x300为DM6006原始反馈ID)
 #define BIG_YAW_DMIMU_RecID 0x16   // CAN2, master id
-#define DIAL_RecID 0x141             // CAN2
+#define DIAL_RecID 0x141             // CAN2, 拨盘电机反馈
 
 #define SMALL_YAW_GM6020_RecID 0x205 // CAN1
 // 大Pitch (DM4340) - CAN1, MIT协议
 #define BIG_PITCH_DM4340_RecID 0x301  // 接收ID (CAN1)
 #define BIG_PITCH_DM4340_CMD    0x02   // 发送ID (CAN1)
-// 小Pitch (MF6015) - CAN2, LK协议，替换原PITCH_GM6020(0x206, CAN1)
+// 小Pitch (MF6015) - CAN2, LK协议
 #define SMALL_PITCH_MF6015_RecID 0x142  // 接收ID (CAN2)
 #define SMALL_PITCH_MF6015_CMD   0x142  // 发送ID (CAN2)
 #define FRIC1_M3508_RecID 0x201      // CAN1
 #define FRIC2_M3508_RecID 0x202      // CAN1
 /*********************************CAN发送ID*******************************************/
-#define GIMBAL_TO_CHASSIS_FIRST_ID 0x10  // CAN2,向下板发送遥控器数据
-#define GIMBAL_TO_CHASSIS_SECOND_ID 0x11 // CAN2,向下板发送导航xy轴目标速度，导航的目标底盘模式，哨兵健康状态，是否正在上坡等标志位
-#define GIMBAL_TO_CHASSIS_THIRD_ID 0x101  // CAN2,发什么待定
-#define BIG_YAW_DM6006_TransID 0x01       // CAN2,DM6006
+#define GIMBAL_TO_CHASSIS_FIRST_ID 0x10  // CAN1,向下板发送遥控器数据
+#define GIMBAL_TO_CHASSIS_SECOND_ID 0x11 // CAN1,向下板发送导航xy轴目标速度，导航的目标底盘模式，哨兵健康状态，是否正在上坡等标志位
+#define GIMBAL_TO_CHASSIS_THIRD_ID 0x101  // CAN1,发什么待定
+#define BIG_YAW_DM6006_TransID 0x01       // CAN1,DM6006大Yaw MIT控制
 #define BIG_YAW_DMIMU_TransID 0x15        // CAN2,CAN id
 #define DIAL_TransID 0x141                // CAN2,拨盘电机
 
 #define SMALL_YAW_AND_PITCH_TransID 0x1FE // CAN1,两个6020一起发
-#define FRIC_M3508_TransID 0x200          // CAN1,两个3508一起发
+#define FRIC_M3508_TransID 0x200          // CAN2,两个3508一起发
 /***********************************************************************************/
 #define CAN_TX_DIV2 2
 #define CAN_TX_DIV3 3

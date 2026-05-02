@@ -38,13 +38,13 @@ CAN_RxHeaderTypeDef rx_header; // debug用，看can接收正不正常
 QueueHandle_t CAN1_send_queue; // CAN1消息队列句柄,此队列用于储存CAN1第一次发送的消息
 QueueHandle_t CAN2_send_queue; // CAN2消息队列句柄，此队列用于储存CAN2第一次发送的消息
 
-#define GIMBAL_TO_CHASSIS_FIRST_SEND_QUEUE CAN2_send_queue
-#define GIMBAL_TO_CHASSIS_SECOND_SEND_QUEUE CAN2_send_queue
-#define GIMBAL_TO_CHASSIS_THIRD_SEND_QUEUE CAN2_send_queue
+#define GIMBAL_TO_CHASSIS_FIRST_SEND_QUEUE CAN1_send_queue  // 上下板通讯改到CAN1
+#define GIMBAL_TO_CHASSIS_SECOND_SEND_QUEUE CAN1_send_queue // 上下板通讯改到CAN1
+#define GIMBAL_TO_CHASSIS_THIRD_SEND_QUEUE CAN1_send_queue  // 上下板通讯改到CAN1
 #define DIAL_SEND_QUEUE CAN2_send_queue
-#define BIG_YAW_DM6006_SEND_QUEUE CAN2_send_queue
+#define BIG_YAW_DM6006_SEND_QUEUE CAN1_send_queue           // 大Yaw改到CAN1
 #define SMALL_YAW_AND_PITCH_SEND_QUEUE CAN1_send_queue
-#define FRIC_M3508_SEND_QUEUE CAN1_send_queue
+#define FRIC_M3508_SEND_QUEUE CAN2_send_queue                // 摩擦轮改到CAN2
 #define BIG_PITCH_SEND_QUEUE CAN1_send_queue
 #define SMALL_PITCH_SEND_QUEUE CAN2_send_queue
 /*********************************************CAN发送消息实例*********************************************************************/
