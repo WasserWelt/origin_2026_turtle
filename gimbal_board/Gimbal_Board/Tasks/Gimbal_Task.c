@@ -178,8 +178,8 @@ static void Gimbal_Data_Update(void)
     gimbal_small_yaw_motor.ENC_angle_set_last = gimbal_small_yaw_motor.ENC_angle_set;
     gimbal_small_yaw_motor.INS_speed_set_last = gimbal_small_yaw_motor.INS_speed_set;
 
-    gimbal_small_yaw_motor.INS_speed_now = (-arm_sin_f32(INS.Pitch * DEGREE_TO_RAD) * INS.Gyro[AXIS_X] + arm_cos_f32(INS.Pitch * DEGREE_TO_RAD) * INS.Gyro[AXIS_Z]) * RAD_TO_DEGREE; // 单位度每秒
-    gimbal_small_yaw_motor.INS_angle_now = INS.Yaw;
+    gimbal_small_yaw_motor.INS_speed_now =  (-arm_sin_f32(imu.pitch * DEGREE_TO_RAD) * imu.gyro[AXIS_X] + arm_cos_f32(imu.pitch * DEGREE_TO_RAD) * imu.gyro[AXIS_Z])* RAD_TO_DEGREE; // 单位度每秒，做了俯仰速度偏差处理
+    gimbal_small_yaw_motor.INS_angle_now = imu.yaw;
 
     // 处理小yaw电机位置编码器值的跳变问题
     if (SMALL_YAW_MIDDLE_ENC_ZERO < 1500 && motor_measure_small_yaw.ecd > 6692)
@@ -192,7 +192,7 @@ static void Gimbal_Data_Update(void)
     const float lpf_coeff = 0.5f; // 低通滤波系数
     DM_big_yaw_motor.INS_angle_set_last = DM_big_yaw_motor.INS_angle_set;
     DM_big_yaw_motor.INS_speed_set_last = DM_big_yaw_motor.INS_speed_set;
-    DM_big_yaw_motor.INS_speed_now = imu.gyro[2] * RAD_TO_DEGREE;
+    DM_big_yaw_motor.INS_speed_now = -INS.Gyro[AXIS_Z] * RAD_TO_DEGREE; // 修改
     DM_big_yaw_motor.INS_angle_now = gimbal_small_yaw_motor.INS_angle_now + (SMALL_YAW_MIDDLE_ENC_ZERO * GM6020_ENC_TO_DEGREE - gimbal_small_yaw_motor.ENC_angle_now);
     DM_big_yaw_motor.vel_filtered = lpf_coeff * DM_big_yaw_motor.vel + (1.0f - lpf_coeff) * DM_big_yaw_motor.vel_last;
     DM_big_yaw_motor.vel_last = DM_big_yaw_motor.vel;
@@ -200,8 +200,8 @@ static void Gimbal_Data_Update(void)
     gimbal_pitch_motor.INS_angle_set_last = gimbal_pitch_motor.INS_angle_set;
     gimbal_pitch_motor.ENC_angle_set_last = gimbal_pitch_motor.ENC_angle_set;
     gimbal_pitch_motor.INS_speed_set_last = gimbal_pitch_motor.INS_speed_set;
-    gimbal_pitch_motor.INS_speed_now = -INS.Gyro[AXIS_Y] * RAD_TO_DEGREE; // 单位度每秒
-    gimbal_pitch_motor.INS_angle_now = -INS.Pitch;
+    gimbal_pitch_motor.INS_speed_now = imu.gyro[1] * RAD_TO_DEGREE; // 修改
+    gimbal_pitch_motor.INS_angle_now = imu.pitch; // 修改
 
     // 处理小Pitch电机位置编码器值的跳变问题（MF6015, 16位, 0-65535）
     if (motor_measure_pitch.ecd > MF6015_ECD_ANGLE_MAX)
